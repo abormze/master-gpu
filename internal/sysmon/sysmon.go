@@ -250,6 +250,21 @@ func ProcStat(pid int) (rss uint64, ticks uint64) {
 	return r * uint64(os.Getpagesize()), u + k
 }
 
+// ProcWritten returns the bytes a process has written (files, pipes and sockets).
+func ProcWritten(pid int) uint64 {
+	b, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/io")
+	if err != nil {
+		return 0
+	}
+	for _, l := range strings.Split(string(b), "\n") {
+		if v, ok := strings.CutPrefix(l, "wchar: "); ok {
+			n, _ := strconv.ParseUint(v, 10, 64)
+			return n
+		}
+	}
+	return 0
+}
+
 func osName() string {
 	b, _ := os.ReadFile("/etc/os-release")
 	for _, l := range strings.Split(string(b), "\n") {
