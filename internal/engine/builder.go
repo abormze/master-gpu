@@ -373,11 +373,15 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		if p := nvPreset(t.Preset, name, o.FFmpegVer); p != "" {
 			a = append(a, "-preset:v:"+vi, p)
 		}
-		if t.Profile != "" && !strings.HasPrefix(name, "mpeg2") {
-			a = append(a, "-profile:v:"+vi, t.Profile)
+		if pr := codecProfile(t.Profile, name); pr != "" && !strings.HasPrefix(name, "mpeg2") {
+			a = append(a, "-profile:v:"+vi, pr)
 		}
 		if t.Level != "" {
-			a = append(a, "-level:v:"+vi, t.Level)
+			lv := t.Level
+			if strings.Contains(name, "hevc") || strings.Contains(name, "265") {
+				lv = strings.TrimSuffix(lv, ".0")
+			}
+			a = append(a, "-level:v:"+vi, lv)
 		}
 		if t.Tune != "" && (strings.HasPrefix(name, "libx26") || nv) {
 			a = append(a, "-tune:v:"+vi, t.Tune)
@@ -658,6 +662,10 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		}
 		a = append(a, fmt.Sprintf("-tag:v:%d", i), tag)
 	}
+	if fullHW && o.FFmpegVer >= 5 {
+		// keeps CUDA frames on the GPU when the decoder reinitialises (file loop, source switch)
+		a = append(a, "-autoscale", "0")
+	}
 	a = append(a, "-flags", "+global_header", "-f", "tee", "-use_fifo", "1", "-fifo_options", "drop_pkts_on_overflow=1:attempt_recovery=1:recover_any_error=1:recovery_wait_time=1:restart_with_keyframe=1", strings.Join(slaves, "|"))
 	return a, variants, nil
 }
@@ -672,25 +680,56 @@ type Variant struct {
 }
 
 func nvPreset(p, enc string, ver int) string {
+	nv, x26 := strings.Contains(enc, "nvenc"), strings.HasPrefix(enc, "libx26")
 	if p == "" {
-		if strings.Contains(enc, "nvenc") {
+		if nv {
 			if ver >= 5 {
 				return "p4"
 			}
 			return "fast"
 		}
-		if strings.HasPrefix(enc, "libx26") {
+		if x26 {
 			return "veryfast"
 		}
 		return ""
 	}
-	if strings.Contains(enc, "nvenc") && ver < 5 && len(p) == 2 && p[0] == 'p' {
-		m := map[string]string{"p1": "fast", "p2": "fast", "p3": "medium", "p4": "medium", "p5": "slow", "p6": "slow", "p7": "slow"}
-		return m[p]
+	if nv {
+		if m, ok := map[string]string{"ultrafast": "fast", "superfast": "fast", "veryfast": "fast", "faster": "fast", "slower": "slow", "veryslow": "slow"}[p]; ok {
+			return m
+		}
+		if ver < 5 && len(p) == 2 && p[0] == 'p' {
+			return map[string]string{"p1": "fast", "p2": "fast", "p3": "medium", "p4": "medium", "p5": "slow", "p6": "slow", "p7": "slow"}[p]
+		}
+		return p
 	}
-	if strings.HasPrefix(enc, "libx26") && len(p) == 2 && p[0] == 'p' {
-		m := map[string]string{"p1": "ultrafast", "p2": "superfast", "p3": "veryfast", "p4": "faster", "p5": "fast", "p6": "medium", "p7": "slow"}
-		return m[p]
+	if x26 {
+		if m, ok := map[string]string{"p1": "ultrafast", "p2": "superfast", "p3": "veryfast", "p4": "faster", "p5": "fast", "p6": "medium", "p7": "slow",
+			"hp": "veryfast", "hq": "slow", "llhp": "ultrafast", "llhq": "veryfast", "ll": "superfast", "bd": "slow", "lossless": "medium"}[p]; ok {
+			return m
+		}
+		return p
+	}
+	if strings.HasSuffix(enc, "_qsv") {
+		return p
+	}
+	return ""
+}
+
+// codecProfile drops profile names that the selected encoder can't use
+// (e.g. "high" on HEVC or "main10" on H.264) instead of failing the stream.
+func codecProfile(p, enc string) string {
+	hevc := strings.Contains(enc, "hevc") || strings.Contains(enc, "265")
+	switch {
+	case hevc && (p == "baseline" || p == "high" || p == "high444p" || p == "mainsp"):
+		return "main"
+	case hevc && p == "main12":
+		return "rext"
+	case strings.HasPrefix(enc, "libx264") && p == "high444p":
+		return "high444"
+	case !hevc && (p == "main10" || p == "main12" || p == "mainsp" || p == "rext"):
+		return "high"
+	case strings.Contains(enc, "av1"):
+		return ""
 	}
 	return p
 }

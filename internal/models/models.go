@@ -239,6 +239,8 @@ type Stream struct {
 type Profile struct {
 	ID        int64     `json:"id"`
 	Name      string    `json:"name"`
+	ServerID  int64     `json:"server_id"`
+	GPU       *int      `json:"gpu,omitempty"` // nil = stream decides, -2 auto, -1 cpu, >=0 index
 	Transcode Transcode `json:"transcode"`
 }
 

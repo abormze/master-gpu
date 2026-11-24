@@ -145,3 +145,41 @@ th{text-transform:uppercase;letter-spacing:.04em;font-size:11px;font-weight:800;
 .sw input:checked+i{background:var(--pri)}
 .login{background:radial-gradient(900px 520px at 12% 8%,rgba(230,0,126,.28),transparent),radial-gradient(800px 520px at 88% 92%,rgba(26,109,255,.28),transparent),var(--bg)}
 .login .btn.p{background:linear-gradient(135deg,#e6007e,#1a6dff)}
+
+/* Xaccel-style single page editor */
+.modal.xpage{width:min(1040px,100%);max-height:96vh}
+.xcf .tp{display:block;padding:18px 8px 8px;border-bottom:1px solid var(--line)}
+.xcf .tp:last-child{border-bottom:0}
+.xcf .tp>.f{display:grid;grid-template-columns:220px minmax(0,460px) 22px;gap:4px 14px;align-items:start;max-width:740px;margin:0 auto 12px}
+.xcf .tp>.f>label:first-child:not(.sw){justify-self:start;background:var(--pri);color:#fff;font-size:11px;font-weight:600;padding:2px 7px;border-radius:3px;margin:9px 0 0;line-height:1.5}
+.xcf .tp>.f[data-ty=bool]>.sw{grid-column:2}
+.xcf .tp>.f[data-ty=rows]{grid-template-columns:220px minmax(0,460px) 22px}
+.xcf .tp>.f[data-ty=rows]>.rows,.xcf .tp>.f[data-ty=rows]>[data-add]{grid-column:2}
+.xcf .tp>.f[data-ty=rows]>[data-add]{justify-self:start}
+.xcf .tp>.f.srcopt{display:none}.xcf .tp>.f.srcopt.on{display:grid}
+.xcf .pnote{grid-column:auto!important;display:block;max-width:740px;margin:0 auto 12px;padding:10px 14px;border-radius:8px;background:rgba(26,109,255,.1);border:1px solid rgba(26,109,255,.35)}
+.xsh{display:inline-block;background:#3a8dde;color:#fff;font-size:11px;font-weight:600;padding:2px 8px;border-radius:3px;margin:0 0 14px}
+.hq{display:inline-grid;place-items:center;width:18px;height:18px;margin-top:10px;border-radius:50%;background:var(--txt);color:var(--card);font-size:11px;font-weight:700;cursor:help}
+.f:not(.xcf .f) .hq{display:none}
+.xcf .g{display:flex;gap:0;align-items:end}.xcf .g>.f{flex:1;min-width:0;margin:0}
+.xcf .g .f>label,.xcf .row .f>label{background:none!important;color:var(--mut)!important;padding:0!important;margin:0 0 2px!important;font-size:10px!important;font-weight:400!important}
+.xcf .g .in{border-radius:0}.xcf .g .hq{display:none}.xcf .gmore{margin-top:6px}
+.xcf .row{padding:10px 10px 4px}.xcf .row .form{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:6px 8px}
+.xcf .row .hq{display:none}
+.ig{display:flex}.ig>.in{flex:1;border-start-end-radius:0;border-end-end-radius:0}
+.ig>span{display:flex;align-items:center;padding:0 10px;border:1px solid var(--line);border-inline-start:0;border-radius:0 8px 8px 0;color:var(--mut);background:var(--card2)}
+[dir=rtl] .ig>span{border-radius:8px 0 0 8px}
+.ib{display:flex;align-items:stretch}.ib>.in,.ib>.ul{flex:1;min-width:0}.ib>.btn{border-radius:0;padding:0 12px}.ib>.btn:last-child{border-start-end-radius:8px;border-end-end-radius:8px}
+.ib>.in,.ib .ul .in{border-start-end-radius:0;border-end-end-radius:0}
+.urls{display:grid;gap:8px}.ul small{display:block;font-size:10px;color:var(--mut);margin-bottom:2px}
+.ms{display:flex;flex-wrap:wrap;gap:6px}.ms label{display:flex;align-items:center;gap:5px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px;cursor:pointer;margin:0!important;background:none!important;color:var(--txt)!important}
+.ms label:has(input:checked){border-color:var(--pri);background:rgba(26,109,255,.12)!important}
+.rg{display:flex;align-items:center;gap:10px;padding-top:6px}.rg input{flex:1;accent-color:var(--pri)}
+.btn.w8{background:#ffb000;color:#fff;border-color:#ffb000}
+.nb{display:inline-block;background:var(--pri);color:#fff;border-radius:4px;padding:2px 8px;font-weight:600;font-size:12px;white-space:nowrap}
+.tg{display:inline-block;padding:1px 6px;border-radius:3px;font-size:11px;font-weight:600;color:#fff;background:#8c8fa6;margin:1px 2px;white-space:nowrap}
+.tg.nv{background:#6d8bd8}.tg.cp{background:#8e6be0}.tg.au{background:#ef8fb8}
+@media(max-width:760px){.xcf .tp>.f{grid-template-columns:1fr}.xcf .tp>.f>*{grid-column:1!important}.xcf .hq{display:none}}
+.xcf .tp>.f.pnote{display:block;font-size:13px}
+.ib.url{align-items:flex-end}.ib.url>.btn{height:40px;box-shadow:none}
+.xcf .g>.f[data-ty=fsel]{flex:2}

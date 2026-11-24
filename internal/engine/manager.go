@@ -275,6 +275,12 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 			var pr models.Profile
 			if m.st.Get(models.KProfile, s.ProfileID, &pr) == nil {
 				s.Transcode = MergeProfile(pr.Transcode, s.Transcode)
+				if pr.GPU != nil && *pr.GPU != -3 && s.GPU == -2 {
+					s.GPU = *pr.GPU
+				}
+				if s.ServerID == 0 {
+					s.ServerID = pr.ServerID
+				}
 			}
 		}
 		if len(s.Inputs) == 0 && !s.DRM.Enabled {
@@ -484,10 +490,25 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 		}
 	}()
 	go func() {
+		seen, n, drop, win := map[string]bool{}, 0, 0, time.Now()
 		for l := range errLines {
 			if isNoise(l) {
 				continue
 			}
+			if time.Since(win) > time.Minute {
+				if drop > 0 {
+					m.st.Log("stream", id, "ffmpeg", fmt.Sprintf("… %d repeated lines suppressed", drop))
+				}
+				clear(seen)
+				n, drop, win = 0, 0, time.Now()
+			}
+			k := hexAddr.ReplaceAllString(l, "")
+			if seen[k] || n >= 30 {
+				drop++
+				continue
+			}
+			seen[k] = true
+			n++
 			m.st.Log("stream", id, "ffmpeg", redact(l))
 		}
 	}()
@@ -692,33 +713,26 @@ func writeMaster(root string, vs []Variant) {
 	}
 }
 
-// MergeProfile overlays stream specific non-empty fields on top of a profile.
+var hexAddr = regexp.MustCompile(`0x[0-9a-fA-F]+`)
+
+// MergeProfile applies a profile the way Xaccel does: everything a profile
+// defines (encoders, preset, overlay, audio, subtitle encoder) comes from the
+// profile; per-stream maps, delogo and advanced MPEG-TS/color options stay.
 func MergeProfile(p, s models.Transcode) models.Transcode {
-	r := p
-	if len(s.VideoEncoders) > 0 {
-		r.VideoEncoders = s.VideoEncoders
+	r := s
+	r.HWAccel, r.VideoSync, r.VideoEncoders = p.HWAccel, p.VideoSync, p.VideoEncoders
+	r.Preset, r.Profile, r.Level, r.Tune = p.Preset, p.Profile, p.Level, p.Tune
+	r.FrameRate, r.GOP, r.BFrames, r.Deinterlace, r.PixFmt, r.DAR = p.FrameRate, p.GOP, p.BFrames, p.Deinterlace, p.PixFmt, p.DAR
+	r.OverlayFile, r.OverlayX, r.OverlayY, r.OverlayOpacity, r.OverlayScale = p.OverlayFile, p.OverlayX, p.OverlayY, p.OverlayOpacity, p.OverlayScale
+	r.Text, r.TextX, r.TextY, r.TextSize, r.TextColor, r.TextAlpha, r.TextScroll = p.Text, p.TextX, p.TextY, p.TextSize, p.TextColor, p.TextAlpha, p.TextScroll
+	r.AudioEncoders, r.AudioChannels, r.AudioRate, r.AudioVolume = p.AudioEncoders, p.AudioChannels, p.AudioRate, p.AudioVolume
+	r.AudioNormalize, r.AudioDelay = p.AudioNormalize, p.AudioDelay
+	r.SubMode = p.SubMode
+	if p.SubFile != "" {
+		r.SubFile = p.SubFile
 	}
-	if len(s.AudioEncoders) > 0 {
-		r.AudioEncoders = s.AudioEncoders
-	}
-	setS := func(dst *string, v string) {
-		if v != "" {
-			*dst = v
-		}
-	}
-	setS(&r.HWAccel, s.HWAccel)
-	setS(&r.VideoMap, s.VideoMap)
-	setS(&r.AudioMap, s.AudioMap)
-	setS(&r.OverlayFile, s.OverlayFile)
-	setS(&r.Text, s.Text)
-	setS(&r.SubMode, s.SubMode)
-	setS(&r.SubMap, s.SubMap)
-	setS(&r.SubFile, s.SubFile)
-	setS(&r.PIDMap, s.PIDMap)
-	setS(&r.ServiceName, s.ServiceName)
-	setS(&r.ExtraArgs, s.ExtraArgs)
-	if s.DelogoW > 0 {
-		r.DelogoX, r.DelogoY, r.DelogoW, r.DelogoH = s.DelogoX, s.DelogoY, s.DelogoW, s.DelogoH
+	if p.ExtraArgs != "" {
+		r.ExtraArgs = p.ExtraArgs
 	}
 	return r
 }

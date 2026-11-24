@@ -536,12 +536,22 @@ type streamRow struct {
 	Enabled  bool   `json:"enabled"`
 	Logo     string `json:"logo"`
 	Mode     string `json:"mode"`
+	Profile  int64  `json:"profile"`
 }
 
 func (s *Server) statuses() []streamRow {
 	ss := store.List[models.Stream](s.St, models.KStream)
 	out := make([]streamRow, 0, len(ss))
 	for _, x := range ss {
+		if x.ProfileID > 0 {
+			var pr models.Profile
+			if s.St.Get(models.KProfile, x.ProfileID, &pr) == nil {
+				x.Transcode = engine.MergeProfile(pr.Transcode, x.Transcode)
+				if pr.GPU != nil && *pr.GPU != -3 && x.GPU == -2 {
+					x.GPU = *pr.GPU
+				}
+			}
+		}
 		mode := "copy"
 		if x.Relay {
 			mode = "relay"
@@ -553,7 +563,7 @@ func (s *Server) statuses() []streamRow {
 				mode = "gpu"
 			}
 		}
-		out = append(out, streamRow{Status: s.Mgr.Status(x.ID), Name: x.Name, Category: x.Category, Enabled: x.Enabled, Logo: x.Logo, Mode: mode})
+		out = append(out, streamRow{Status: s.Mgr.Status(x.ID), Name: x.Name, Category: x.Category, Enabled: x.Enabled, Logo: x.Logo, Mode: mode, Profile: x.ProfileID})
 	}
 	return out
 }
