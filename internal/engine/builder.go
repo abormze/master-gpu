@@ -503,6 +503,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	na := len(aenc) + extraA
 	var slaves []string
 	var variants []Variant
+	served := map[string]bool{}
 	for oi, out := range s.Outputs {
 		if out.Disabled {
 			continue
@@ -531,6 +532,14 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		gwPath := strconv.FormatInt(s.ID, 10)
 		if out.Name != "" {
 			gwPath += "_" + out.Name
+		}
+		// the gateway republishes one path over RTMP, RTSP and SRT, so publish it once over RTSP
+		if o.Gateway != "" && out.URL == "" && (out.Type == "rtmp" || out.Type == "rtmp_push" || out.Type == "rtsp" || out.Type == "srt") {
+			if served[gwPath] {
+				continue
+			}
+			served[gwPath] = true
+			out.Type = "rtsp"
 		}
 		switch out.Type {
 		case "hls", "hls_master":
@@ -627,7 +636,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	if len(slaves) == 0 {
 		return nil, nil, fmt.Errorf("stream has no enabled outputs")
 	}
-	a = append(a, "-flags", "+global_header", "-f", "tee", "-use_fifo", "1", "-fifo_options", "drop_pkts_on_overflow=1:attempt_recovery=1:recover_any_error=1:recovery_wait_time=1:restart_with_keyframe=1", strings.Join(slaves, "|"))
+	a = append(a, "-tag:v", "0", "-flags", "+global_header", "-f", "tee", "-use_fifo", "1", "-fifo_options", "drop_pkts_on_overflow=1:attempt_recovery=1:recover_any_error=1:recovery_wait_time=1:restart_with_keyframe=1", strings.Join(slaves, "|"))
 	return a, variants, nil
 }
 
