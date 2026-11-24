@@ -1,7 +1,7 @@
 "use strict";
 /* Master GPU v1.0 — single-file UI, no build step */
 const $ = (s, e = document) => e.querySelector(s), $$ = (s, e = document) => [...e.querySelectorAll(s)];
-const S = { me: null, ver: {}, lang: localStorage.lang || "ar", theme: localStorage.theme || "dark", dash: null, rows: [], hist: { cpu: [], rx: [], tx: [], gpu: {} }, cache: {}, ws: null };
+const S = { me: null, ver: {}, lang: localStorage.lang || "ar", theme: localStorage.theme || "light", dash: null, rows: [], hist: { cpu: [], rx: [], tx: [], gpu: {} }, cache: {}, ws: null };
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const L = s => { const p = String(s).split("|"); return S.lang === "ar" && p[1] ? p[1] : p[0]; };
 const fmtB = (b, d = 1) => { b = +b || 0; const u = ["B", "KB", "MB", "GB", "TB"]; let i = 0; while (b >= 1024 && i < 4) { b /= 1024; i++; } return b.toFixed(i ? d : 0) + " " + u[i]; };
@@ -141,7 +141,7 @@ async function boot() {
 function render() {
   if (!S.me) return loginView();
   const isAdmin = S.me.role === "admin";
-  $("#app").innerHTML = `<svg width="0" height="0" style="position:absolute"><defs><linearGradient id="rg"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs></svg>
+  $("#app").innerHTML = `<svg width="0" height="0" style="position:absolute"><defs><linearGradient id="rg"><stop offset="0" stop-color="#1a6dff"/><stop offset="1" stop-color="#e6007e"/></linearGradient></defs></svg>
   <div class="shell"><aside class="side" id="side"><div class="brand"><img src="logo.svg" alt=""><div><span class="grad">Master GPU</span><small>v${esc(S.ver.version || "1.0")} · ${esc(S.ver.build || "")}</small></div></div>
   <nav class="nav">${NAV.map(([g, items]) => (g ? `<div class="grp">${L(g)}</div>` : "") + items.filter(x => !x[3] || isAdmin).map(([r, i, t]) => `<a href="#/${r}" data-r="${r}">${ico(i)}<span>${L(t)}</span></a>`).join("")).join("")}</nav></aside>
   <main class="main"><div class="top"><button class="btn i burger" id="burger">${ico("menu")}</button><h1 id="title"></h1>
@@ -358,8 +358,8 @@ VIEWS.dash = el => {
     $("#host").textContent = `${sy.hostname} · ${sy.os}`;
     $("#sysm").innerHTML = meter("CPU", sy.cpu, 100, `${sy.cpu.toFixed(1)}% · ${sy.cores} cores · load ${sy.load1}`) + meter("RAM", sy.mem_used, sy.mem_total, `${fmtB(sy.mem_used)} / ${fmtB(sy.mem_total)}`) + meter(L("Disk|القرص"), sy.disk_used, sy.disk_total, `${fmtB(sy.disk_used)} / ${fmtB(sy.disk_total)}`) + meter("RAM disk (HLS)", sy.shm_used, sy.shm_total, `${fmtB(sy.shm_used)} / ${fmtB(sy.shm_total)}`);
     $("#sysk").innerHTML = `<b>IN</b><span>${fmtBits(sy.net_rx)}</span><b>OUT</b><span>${fmtBits(sy.net_tx)}</span><b>${L("Uptime|مدة التشغيل")}</b><span>${fmtDur(sy.uptime)}</span><b>${L("Panel|اللوحة")}</b><span>${fmtB(sy.panel_rss)} · ${sy.panel_cpu.toFixed(1)}% CPU · ${L("up|يعمل")} ${fmtDur(d.uptime)}</span><b>NVIDIA</b><span>${d.gpu.available ? `driver ${esc(d.gpu.driver)} · CUDA ${esc(d.gpu.cuda)}${d.gpu.patched ? " · patched" : ""}` : `<span class="chip warn">${esc(d.gpu.error || "not detected")}</span>`}</span><b>FFmpeg</b><span>v${d.ffmpeg}</span>`;
-    spark($("#cpuC"), [S.hist.cpu], ["#22d3ee"], 100); spark($("#netC"), [S.hist.rx, S.hist.tx], ["#22c55e", "#22d3ee"]);
-    const g = $("#gpus"); g.innerHTML = (d.gpu.cards || []).map(gpuCard).join(""); $$("canvas[data-g]", g).forEach(cv => { const h = S.hist.gpu[cv.dataset.g]; h && spark(cv, [h.util, h.enc], ["#8b5cf6", "#22d3ee"], 100); });
+    spark($("#cpuC"), [S.hist.cpu], ["#1a6dff"], 100); spark($("#netC"), [S.hist.rx, S.hist.tx], ["#16c172", "#1a6dff"]);
+    const g = $("#gpus"); g.innerHTML = (d.gpu.cards || []).map(gpuCard).join(""); $$("canvas[data-g]", g).forEach(cv => { const h = S.hist.gpu[cv.dataset.g]; h && spark(cv, [h.util, h.enc], ["#e6007e", "#1a6dff"], 100); });
     const bad = S.rows.filter(r => r.enabled && r.state !== "running");
     $("#bad").innerHTML = bad.map(r => `<tr><td><span class="dot ${r.state}"></span>${esc(r.name)}</td><td>${esc(r.state)}</td><td class="mut" style="white-space:normal">${esc(r.last_error || "")}</td><td>${r.restarts} ↻</td></tr>`).join("") || `<tr><td class="empty">${L("All streams healthy|كل القنوات سليمة")} ✓</td></tr>`;
   };
@@ -371,7 +371,7 @@ VIEWS.gpu = el => {
   S.onLive = () => {
     if (!$("#gl") || !S.dash) return; const cs = S.dash.gpu.cards || [];
     $("#gl").innerHTML = cs.map(c => gpuCard(c).replace('<div class="bd">', `<div class="bd"><div class="kv" style="margin-bottom:10px"><b>UUID</b><span class="mono">${esc(c.uuid)}</span><b>Bus</b><span class="mono">${esc(c.bus)}</span><b>Driver</b><span>${esc(c.driver)} · VBIOS ${esc(c.vbios)}</span><b>Clocks</b><span>${c.clock_gr} / ${c.clock_mem} MHz</span><b>Encode FPS</b><span>${c.enc_fps}</span></div>`)).join("") || `<div class="card empty">${esc(S.dash.gpu.error || L("No NVIDIA GPU detected|لا يوجد كرت NVIDIA"))}</div>`;
-    $$("canvas[data-g]").forEach(cv => { const h = S.hist.gpu[cv.dataset.g]; h && spark(cv, [h.util, h.enc], ["#8b5cf6", "#22d3ee"], 100); });
+    $$("canvas[data-g]").forEach(cv => { const h = S.hist.gpu[cv.dataset.g]; h && spark(cv, [h.util, h.enc], ["#e6007e", "#1a6dff"], 100); });
     $("#gp").innerHTML = cs.flatMap(c => (c.procs || []).map(p => `<tr><td>${c.index}</td><td>${p.pid}</td><td class="mono">${esc(p.name)}</td><td>${p.mem} MiB</td></tr>`)).join("") || `<tr><td colspan="4" class="empty">—</td></tr>`;
   };
   S.onLive();
