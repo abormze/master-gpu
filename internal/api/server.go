@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"gpupanel/internal/drm"
+	"hash/crc32"
 	"io"
 	"io/fs"
 	"net/http"
@@ -279,10 +280,18 @@ func (s *Server) routes() {
 
 func (s *Server) web() http.Handler {
 	fsrv := http.FileServer(http.FS(s.Web))
+	b, err := fs.ReadFile(s.Web, "index.html")
+	if err == nil {
+		// content-hash asset URLs so browsers pick up new versions immediately
+		for _, a := range []string{"app.js", "app.css"} {
+			if d, e := fs.ReadFile(s.Web, a); e == nil {
+				b = []byte(strings.ReplaceAll(string(b), `"`+a+`"`, fmt.Sprintf(`"%s?v=%08x"`, a, crc32.ChecksumIEEE(d))))
+			}
+		}
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.TrimPrefix(r.URL.Path, "/")
 		if p == "" || !strings.Contains(p, ".") {
-			b, err := fs.ReadFile(s.Web, "index.html")
 			if err != nil {
 				http.Error(w, "ui missing", 500)
 				return
@@ -292,7 +301,11 @@ func (s *Server) web() http.Handler {
 			w.Write(b)
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		if r.URL.Query().Get("v") != "" {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-cache")
+		}
 		fsrv.ServeHTTP(w, r)
 	})
 }
