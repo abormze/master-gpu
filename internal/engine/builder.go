@@ -35,6 +35,8 @@ func isCopy(t *models.Transcode) bool {
 	return true
 }
 
+func isHEVC(c string) bool { return c == "hevc" || c == "h265" }
+
 func encName(codec, hw string) string {
 	nv := hw == "full" || hw == "partial" || hw == "encode" || hw == "nvenc"
 	qsv := hw == "qsv"
@@ -562,7 +564,11 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 				}
 				flags := "delete_segments+omit_endlist+temp_file+independent_segments"
 				seg := "%d.ts"
-				opt := fmt.Sprintf("select=\\'%s\\':f=hls:hls_time=%d:hls_list_size=%d:hls_flags=%s:hls_delete_threshold=2:hls_allow_cache=0:hls_segment_filename=%s", sel, hlsTime, hlsList, flags, escTee(filepath.Join(dir, seg)))
+				fmp4 := ""
+				if v < len(venc) && isHEVC(venc[v].Codec) {
+					seg, fmp4 = "%d.m4s", ":hls_segment_type=fmp4:hls_fmp4_init_filename=init.mp4"
+				}
+				opt := fmt.Sprintf("select=\\'%s\\':f=hls:hls_time=%d:hls_list_size=%d:hls_flags=%s:hls_delete_threshold=2:hls_allow_cache=0%s:hls_segment_filename=%s", sel, hlsTime, hlsList, flags, fmp4, escTee(filepath.Join(dir, seg)))
 				if o.FFmpegVer >= 5 && hasSubs {
 					// subtitles go as separate webvtt rendition handled by the manager
 				}
@@ -636,7 +642,14 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	if len(slaves) == 0 {
 		return nil, nil, fmt.Errorf("stream has no enabled outputs")
 	}
-	a = append(a, "-tag:v", "0", "-flags", "+global_header", "-f", "tee", "-use_fifo", "1", "-fifo_options", "drop_pkts_on_overflow=1:attempt_recovery=1:recover_any_error=1:recovery_wait_time=1:restart_with_keyframe=1", strings.Join(slaves, "|"))
+	for i, v := range venc {
+		tag := "0"
+		if isHEVC(v.Codec) {
+			tag = "hvc1"
+		}
+		a = append(a, fmt.Sprintf("-tag:v:%d", i), tag)
+	}
+	a = append(a, "-flags", "+global_header", "-f", "tee", "-use_fifo", "1", "-fifo_options", "drop_pkts_on_overflow=1:attempt_recovery=1:recover_any_error=1:recovery_wait_time=1:restart_with_keyframe=1", strings.Join(slaves, "|"))
 	return a, variants, nil
 }
 
