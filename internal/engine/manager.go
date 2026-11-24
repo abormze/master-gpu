@@ -344,9 +344,9 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 		for _, v := range variants {
 			os.MkdirAll(filepath.Join(root, v.Dir), 0o755)
 		}
-		for _, o := range s.Outputs {
+		for oi, o := range s.Outputs {
 			if o.Type == "dash" || (o.Type == "hls" && !o.Disabled) {
-				os.MkdirAll(filepath.Join(root, def(o.Name, "o")), 0o755)
+				os.MkdirAll(filepath.Join(root, def(o.Name, "o"+strconv.Itoa(oi))), 0o755)
 			}
 		}
 		writeMaster(root, variants)
