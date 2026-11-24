@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"gpupanel/internal/api"
+	"gpupanel/internal/drm"
 	"gpupanel/internal/engine"
 	"gpupanel/internal/gpu"
 	"gpupanel/internal/models"
@@ -85,7 +87,18 @@ func main() {
 		go runGateway(gw, *dir, stop)
 	}
 
-	srv := api.New(&api.Server{St: st, Auth: auth, Mgr: mgr, Sys: sm, GPU: gm, Web: web.FS(),
+	addr := *listen
+	if addr == "" {
+		p := set.HTTPPort
+		if p == 0 {
+			p = 8080
+		}
+		addr = fmt.Sprintf(":%d", p)
+	}
+	ds := &drm.Service{St: st, LocalBase: "http://" + loopback(addr), FFmpegVer: mgr.FFVersion}
+	mgr.PrepDRM, mgr.Relay = ds.Prep, ds.Relay
+
+	srv := api.New(&api.Server{St: st, Auth: auth, Mgr: mgr, Sys: sm, GPU: gm, Web: web.FS(), DRM: ds,
 		Updater: &api.Updater{Bin: bin, Before: mgr.StopAll}})
 	mgr.Hooks.OnState = func(id int64, name string, from, to engine.State, msg string) {
 		if to == engine.Failed && from == engine.Running {
@@ -97,14 +110,6 @@ func main() {
 	}
 	st.Log("panel", 0, "info", fmt.Sprintf("%s %s started", version.Name, version.Version))
 
-	addr := *listen
-	if addr == "" {
-		p := set.HTTPPort
-		if p == 0 {
-			p = 8080
-		}
-		addr = fmt.Sprintf(":%d", p)
-	}
 	hs := &http.Server{Addr: addr, Handler: srv, ReadHeaderTimeout: 15 * time.Second, IdleTimeout: 120 * time.Second}
 	go func() {
 		log.Printf("%s %s listening on %s", version.Name, version.Version, addr)
@@ -190,3 +195,15 @@ func pickFFmpeg(cur string, gm *gpu.Monitor) string {
 }
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// loopback turns a listen address such as ":8080" or "0.0.0.0:8080" into "127.0.0.1:8080".
+func loopback(addr string) string {
+	h, p, err := net.SplitHostPort(addr)
+	if err != nil {
+		return "127.0.0.1:8080"
+	}
+	if h == "" || h == "0.0.0.0" || h == "::" {
+		h = "127.0.0.1"
+	}
+	return net.JoinHostPort(h, p)
+}

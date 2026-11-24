@@ -12,15 +12,17 @@ import (
 
 // BuildOpts carries the runtime decisions the manager made before building.
 type BuildOpts struct {
-	Input     string   // effective input URL (may be a local relay / FIFO)
-	Inputs2   []string // extra inputs (DRM audio/subtitle FIFOs)
-	InputKeys []string // per-input decryption key (hex) for CENC fMP4
-	GPU       int      // -1 cpu
-	HLSRoot   string   // HLSDir/<id>
-	HTTPPipe  bool     // send an MPEG-TS copy to fd 3 for HTTP/relay clients
-	Proxy     string   // http proxy for ffmpeg (local relay)
-	Gateway   string   // host of the protocol gateway (mediamtx) for served rtmp/rtsp/srt
-	FFmpegVer int      // major version
+	Input      string   // effective input URL (may be a local relay / FIFO)
+	Inputs2    []string // extra inputs (DRM audio/subtitle FIFOs)
+	InputKeys  []string // per-input decryption key (hex) for CENC fMP4
+	GPU        int      // -1 cpu
+	HLSRoot    string   // HLSDir/<id>
+	HTTPPipe   bool     // send an MPEG-TS copy to fd 3 for HTTP/relay clients
+	Proxy      string   // http proxy for ffmpeg (local relay)
+	Gateway    string   // host of the protocol gateway (mediamtx) for served rtmp/rtsp/srt
+	FFmpegVer  int      // major version
+	CENC       bool     // inputs are CENC DASH manifests (dash demuxer key option)
+	AudioInput int      // input index that supplies audio (DRM with separate audio key)
 }
 
 func isCopy(t *models.Transcode) bool {
@@ -168,13 +170,17 @@ func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
 	} else if !isCopy(t) && t.HWAccel == "qsv" {
 		a = append(a, "-hwaccel", "qsv", "-hwaccel_output_format", "qsv")
 	}
+	keyOpt := "-decryption_key"
+	if o.CENC {
+		keyOpt = "-cenc_decryption_key"
+	}
 	if len(o.InputKeys) > 0 && o.InputKeys[0] != "" {
-		a = append(a, "-decryption_key", o.InputKeys[0])
+		a = append(a, keyOpt, o.InputKeys[0])
 	}
 	a = append(a, "-thread_queue_size", "1024", "-i", in)
 	for i, x := range o.Inputs2 {
 		if i+1 < len(o.InputKeys) && o.InputKeys[i+1] != "" {
-			a = append(a, "-decryption_key", o.InputKeys[i+1])
+			a = append(a, keyOpt, o.InputKeys[i+1])
 		}
 		a = append(a, "-thread_queue_size", "1024", "-i", x)
 	}
@@ -219,6 +225,9 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	}
 	vmap := mapSpec(t.VideoMap, "v")
 	amap := mapSpec(t.AudioMap, "a")
+	if o.AudioInput > 0 && strings.HasPrefix(amap, "0:") {
+		amap = strconv.Itoa(o.AudioInput) + amap[1:]
+	}
 
 	// ---- video filter graph
 	var vlabels []string
@@ -458,7 +467,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	// extra DRM audio tracks from secondary inputs
 	extraA := 0
 	for i := range o.Inputs2 {
-		if strings.Contains(o.Inputs2[i], "audio") {
+		if o.AudioInput == 0 && strings.Contains(o.Inputs2[i], "audio") {
 			a = append(a, "-map", fmt.Sprintf("%d:a?", i+1), "-c:a:"+strconv.Itoa(len(aenc)+extraA), "copy")
 			extraA++
 		}

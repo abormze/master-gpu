@@ -88,7 +88,7 @@ type Manager struct {
 	Hooks   Hooks
 	ffVer   int
 	Gateway string
-	PrepDRM func(ctx context.Context, s *models.Stream, root string) (*BuildOpts, error)
+	PrepDRM func(ctx context.Context, s *models.Stream, input, root string) (*BuildOpts, error)
 	Relay   func(s *models.Stream) string // returns local http proxy url when stream needs proxy/bind/dns
 }
 
@@ -310,7 +310,7 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 		}
 		runCtx, runCancel := context.WithCancel(ctx)
 		if s.DRM.Enabled && m.PrepDRM != nil {
-			o2, err := m.PrepDRM(runCtx, &s, root)
+			o2, err := m.PrepDRM(runCtx, &s, opts.Input, root)
 			if err != nil {
 				runCancel()
 				m.st.Log("stream", id, "error", "DRM: "+err.Error())
@@ -323,6 +323,7 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 				continue
 			}
 			opts.Input, opts.Inputs2, opts.InputKeys = o2.Input, o2.Inputs2, o2.InputKeys
+			opts.CENC, opts.AudioInput, opts.Proxy = o2.CENC, o2.AudioInput, o2.Proxy
 		} else if m.Relay != nil {
 			opts.Proxy = m.Relay(&s)
 		}

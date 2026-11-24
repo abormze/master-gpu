@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gpupanel/internal/drm"
 	"io"
 	"io/fs"
 	"net/http"
@@ -35,6 +36,7 @@ type Server struct {
 	GPU     *gpu.Monitor
 	Web     fs.FS
 	Updater *Updater
+	DRM     *drm.Service
 	Started time.Time
 	mux     *http.ServeMux
 	kinds   map[string]kindOps
@@ -263,6 +265,7 @@ func (s *Server) routes() {
 
 	// playback
 	m.HandleFunc("GET /hls/{id}/{path...}", s.hls)
+	m.HandleFunc("GET /drm/{id}/manifest.mpd", s.drmManifest)
 	m.HandleFunc("GET /live/{user}/{pass}/{file}", s.live)
 	m.HandleFunc("GET /ts/{id}", s.tsRelay)
 	m.HandleFunc("GET /get.php", s.getPHP)

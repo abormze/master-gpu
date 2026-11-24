@@ -714,3 +714,20 @@ func (s *Server) exportM3U(w http.ResponseWriter, r *http.Request, _ *models.Acc
 	w.Header().Set("Content-Disposition", "attachment; filename=mastergpu.m3u")
 	io.WriteString(w, b.String())
 }
+
+// drmManifest serves the origin manifest of a DRM stream to the local ffmpeg only.
+func (s *Server) drmManifest(w http.ResponseWriter, r *http.Request) {
+	h, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(h); s.DRM == nil || ip == nil || !ip.IsLoopback() {
+		http.Error(w, "forbidden", 403)
+		return
+	}
+	b, err := s.DRM.Manifest(r.Context(), pathID(r))
+	if err != nil {
+		http.Error(w, err.Error(), 502)
+		return
+	}
+	w.Header().Set("Content-Type", "application/dash+xml")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(b)
+}
