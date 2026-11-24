@@ -493,6 +493,7 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 	go func() {
 		sc := bufio.NewScanner(stdout)
 		running := false
+		var size, lastSize, outUs int64
 		for sc.Scan() {
 			mm := progRe.FindStringSubmatch(sc.Text())
 			if mm == nil {
@@ -510,11 +511,21 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 			case "fps":
 				p.st.FPS, _ = strconv.ParseFloat(v, 64)
 			case "bitrate":
-				f, _ := strconv.ParseFloat(strings.TrimSuffix(v, "kbits/s"), 64)
-				p.st.Bitrate = f
+				if f, err := strconv.ParseFloat(strings.TrimSuffix(v, "kbits/s"), 64); err == nil && f > 0 {
+					p.st.Bitrate = f
+				}
 			case "total_size", "out_time_us":
 				if isCopy(&s.Transcode) {
 					p.last = time.Now()
+				}
+				n, _ := strconv.ParseInt(v, 10, 64)
+				if k == "total_size" {
+					size = n
+				} else if n > 0 && size > 0 {
+					if outUs > 0 && n > outUs && size > lastSize {
+						p.st.Bitrate = float64(size-lastSize) * 8000 / float64(n-outUs)
+					}
+					lastSize, outUs = size, n
 				}
 			case "drop_frames":
 				p.st.Drops, _ = strconv.ParseInt(v, 10, 64)

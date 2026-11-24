@@ -509,6 +509,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		}
 		vs := out.Video
 		as := out.Audio
+		master := out.Type == "hls_master" || (out.Type == "hls" && len(vs) == 0 && nv_ > 1)
 		if len(vs) == 0 {
 			vs = []int{0}
 		}
@@ -529,7 +530,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		}
 		switch out.Type {
 		case "hls", "hls_master":
-			if out.Type == "hls_master" {
+			if master {
 				vs = seq(nv_)
 			}
 			for _, v := range vs {
@@ -537,7 +538,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 					continue
 				}
 				dir := filepath.Join(o.HLSRoot, fmt.Sprintf("%s_v%d", name, v))
-				if out.Type == "hls" && len(vs) == 1 {
+				if !master && len(vs) == 1 {
 					dir = filepath.Join(o.HLSRoot, name)
 				}
 				sel := fmt.Sprintf("v:%d", v)
@@ -554,7 +555,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 				}
 				slaves = append(slaves, "["+opt+"]"+escTee(filepath.Join(dir, "index.m3u8")))
 				ve := venc[v]
-				variants = append(variants, Variant{Dir: filepath.Base(dir), Name: def(ve.Name, ve.Size), Size: ve.Size, Bitrate: ve.Bitrate, Master: out.Type == "hls_master", Output: name})
+				variants = append(variants, Variant{Dir: filepath.Base(dir), Name: def(ve.Name, ve.Size), Size: ve.Size, Bitrate: ve.Bitrate, Master: master, Output: name})
 			}
 		case "dash":
 			dir := filepath.Join(o.HLSRoot, name)
@@ -582,6 +583,11 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			}
 			if out.Type == "srt_listener" && out.Port > 0 {
 				u = fmt.Sprintf("srt://0.0.0.0:%d?mode=listener&pkt_size=1316", out.Port)
+			} else if out.Type == "srt_listener" && !strings.Contains(u, "mode=") {
+				u += sepq(u) + "mode=listener"
+			}
+			if !strings.Contains(u, "pkt_size") {
+				u += sepq(u) + "pkt_size=1316"
 			}
 			if out.Passwd != "" && !strings.Contains(u, "passphrase") {
 				u += "&passphrase=" + url.QueryEscape(out.Passwd)
@@ -617,7 +623,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	if len(slaves) == 0 {
 		return nil, nil, fmt.Errorf("stream has no enabled outputs")
 	}
-	a = append(a, "-flags", "+global_header", "-f", "tee", "-use_fifo", "1", strings.Join(slaves, "|"))
+	a = append(a, "-flags", "+global_header", "-f", "tee", "-use_fifo", "1", "-fifo_options", "drop_pkts_on_overflow=1:attempt_recovery=1:recover_any_error=1:recovery_wait_time=1:restart_with_keyframe=1", strings.Join(slaves, "|"))
 	return a, variants, nil
 }
 

@@ -271,7 +271,13 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	root := s.streamRoot(id)
-	if p == "/" || p == "/auto.m3u8" {
+	alias := p == "/" || p == "/auto.m3u8"
+	if p == "/index.m3u8" {
+		if _, err := os.Stat(filepath.Join(root, p)); err != nil {
+			alias = true
+		}
+	}
+	if alias {
 		if !s.ensure(id) {
 			http.Error(w, "stream offline", 404)
 			return
@@ -290,6 +296,9 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			http.Error(w, "not ready", 404)
 			return
+		}
+		if d := strings.TrimPrefix(filepath.Dir(p), "/"); alias && d != "" {
+			b = prefixPlaylist(b, d+"/")
 		}
 		if tok != "" {
 			b = rewritePlaylist(b, "t="+tok)
@@ -318,6 +327,22 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 	defer f.Close()
 	fi, _ := f.Stat()
 	http.ServeContent(w, r, "", fi.ModTime(), f)
+}
+
+func prefixPlaylist(b []byte, pre string) []byte {
+	rel := func(u string) bool { return u != "" && !strings.HasPrefix(u, "/") && !strings.Contains(u, "://") }
+	var out strings.Builder
+	sc := bufio.NewScanner(strings.NewReader(string(b)))
+	for sc.Scan() {
+		l := sc.Text()
+		if !strings.HasPrefix(l, "#") && rel(l) {
+			l = pre + l
+		} else if i := strings.Index(l, `URI="`); i >= 0 && rel(l[i+5:]) {
+			l = l[:i+5] + pre + l[i+5:]
+		}
+		out.WriteString(l + "\n")
+	}
+	return []byte(out.String())
 }
 
 func rewritePlaylist(b []byte, q string) []byte {
