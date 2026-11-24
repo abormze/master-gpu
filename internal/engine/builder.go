@@ -528,6 +528,10 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		if name == "" {
 			name = "o" + strconv.Itoa(oi)
 		}
+		gwPath := strconv.FormatInt(s.ID, 10)
+		if out.Name != "" {
+			gwPath += "_" + out.Name
+		}
 		switch out.Type {
 		case "hls", "hls_master":
 			if master {
@@ -566,20 +570,20 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		case "rtmp", "rtmp_push":
 			u := out.URL
 			if u == "" {
-				u = "rtmp://" + def(o.Gateway, "127.0.0.1") + ":1935/live/" + name
+				u = "rtmp://" + def(o.Gateway, "127.0.0.1") + ":1935/live/" + gwPath
 			}
 			sel := selector(vs[:1], as[:min(1, len(as))], nv_, na)
 			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=flv:onfail=ignore]%s", sel, escTee(u)))
 		case "rtsp":
 			u := out.URL
 			if u == "" {
-				u = "rtsp://" + def(o.Gateway, "127.0.0.1") + ":8554/live/" + name
+				u = "rtsp://" + def(o.Gateway, "127.0.0.1") + ":8554/live/" + gwPath
 			}
 			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=rtsp:rtsp_transport=tcp:onfail=ignore]%s", selector(vs, as, nv_, na), escTee(u)))
 		case "srt", "srt_listener":
 			u := out.URL
 			if u == "" {
-				u = "srt://" + def(o.Gateway, "127.0.0.1") + ":8890?streamid=publish:live/" + name + "&pkt_size=1316"
+				u = "srt://" + def(o.Gateway, "127.0.0.1") + ":8890?streamid=publish:live/" + gwPath + "&pkt_size=1316"
 			}
 			if out.Type == "srt_listener" && out.Port > 0 {
 				u = fmt.Sprintf("srt://0.0.0.0:%d?mode=listener&pkt_size=1316", out.Port)

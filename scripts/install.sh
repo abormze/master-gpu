@@ -11,6 +11,11 @@ if ! command -v ffmpeg >/dev/null 2>&1; then
   apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg
 fi
 mkdir -p "$DIR/data"
+if [ ! -x "$DIR/mediamtx" ]; then
+  MTX=v1.9.3
+  curl -fsSL "https://github.com/bluenviron/mediamtx/releases/download/$MTX/mediamtx_${MTX}_linux_amd64.tar.gz" | tar xz -C "$DIR" mediamtx \
+    || echo "warning: RTMP/RTSP gateway (mediamtx) not installed"
+fi
 systemctl stop mastergpu 2>/dev/null || true
 install -m 755 "$BIN" "$DIR/mastergpu"
 cat > /etc/systemd/system/mastergpu.service <<UNIT

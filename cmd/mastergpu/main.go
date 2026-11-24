@@ -80,6 +80,10 @@ func main() {
 	go sm.Run(2*time.Second, stop)
 	go gm.Run(2*time.Second, stop)
 	mgr := engine.NewManager(st, gm)
+	if gw := findGateway(*dir, bin); gw != "" {
+		mgr.Gateway = "127.0.0.1"
+		go runGateway(gw, *dir, stop)
+	}
 
 	srv := api.New(&api.Server{St: st, Auth: auth, Mgr: mgr, Sys: sm, GPU: gm, Web: web.FS(),
 		Updater: &api.Updater{Bin: bin, Before: mgr.StopAll}})
