@@ -88,3 +88,9 @@ func TestMapList(t *testing.T) {
 		t.Error("-cc not detected")
 	}
 }
+
+func TestInfoFPS(t *testing.T) {
+	if f := infoFPS([]string{"Stream #0:1: Audio: aac, 48000 Hz", "Stream #0:0: Video: h264, yuv420p, 1920x1080, 25 fps"}); f != 25 {
+		t.Fatal(f)
+	}
+}

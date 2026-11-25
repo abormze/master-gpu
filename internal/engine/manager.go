@@ -659,6 +659,12 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 						}
 					}
 				}
+				// stream copy reports frame=0; show source rate at current speed
+				if p.st.Frames == 0 && isCopy(&s.Transcode) {
+					if f := infoFPS(p.infoIn); f > 0 && p.st.Speed > 0 {
+						p.st.FPS = math.Round(f*p.st.Speed*100) / 100
+					}
+				}
 				// encoded output rate: each HTTP variant once, not every tee/HLS copy
 				var w int64
 				for _, h := range ohubs {
@@ -953,6 +959,18 @@ func dumpLine(p *proc, l string) {
 	} else {
 		p.infoIn = append(p.infoIn, line)
 	}
+}
+
+func infoFPS(lines []string) float64 {
+	for _, l := range lines {
+		if strings.Contains(l, ": Video: ") {
+			if n := dumpNum.FindStringSubmatch(l); n != nil && n[2] == "fps" {
+				f, _ := strconv.ParseFloat(n[1], 64)
+				return f
+			}
+		}
+	}
+	return 0
 }
 
 // Details is the expanded stream view: stream dump and viewers.
