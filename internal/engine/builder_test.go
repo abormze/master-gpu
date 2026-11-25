@@ -69,3 +69,22 @@ func TestBuildCopyAndTranscode(t *testing.T) {
 		}
 	}
 }
+
+func TestMapList(t *testing.T) {
+	for _, c := range []struct{ in, kind, want string }{
+		{"", "a", "0:a:0?"},
+		{"a:0, a:1", "a", "0:a:0 0:a:1"},
+		{"i:0x101", "a", "0:i:0x101"},
+		{"p:1234:a:0", "a", "0:p:1234:a:0"},
+		{"m:language:eng", "a", "0:a:m:language:eng"},
+		{"s:0, -cc", "s", "0:s:0"},
+	} {
+		got, _ := mapList(c.in, c.kind)
+		if strings.Join(got, " ") != c.want {
+			t.Errorf("%q: got %v want %s", c.in, got, c.want)
+		}
+	}
+	if _, cc := mapList("s:0, -cc", "s"); !cc {
+		t.Error("-cc not detected")
+	}
+}

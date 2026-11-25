@@ -562,6 +562,7 @@ type streamRow struct {
 	Logo     string `json:"logo"`
 	Mode     string `json:"mode"`
 	Profile  int64  `json:"profile"`
+	LowLat   bool   `json:"low_latency"`
 }
 
 func (s *Server) statuses() []streamRow {
@@ -588,7 +589,7 @@ func (s *Server) statuses() []streamRow {
 				mode = "gpu"
 			}
 		}
-		out = append(out, streamRow{Status: s.Mgr.Status(x.ID), Name: x.Name, Category: x.Category, Enabled: x.Enabled, Logo: x.Logo, Mode: mode, Profile: x.ProfileID})
+		out = append(out, streamRow{Status: s.Mgr.Status(x.ID), Name: x.Name, Category: x.Category, Enabled: x.Enabled, Logo: x.Logo, Mode: mode, Profile: x.ProfileID, LowLat: x.Transcode.LowLatency})
 	}
 	return out
 }
@@ -612,6 +613,16 @@ func (s *Server) streamAction(w http.ResponseWriter, r *http.Request, ac *models
 	case "switch":
 		idx, _ := strconv.Atoi(r.URL.Query().Get("input"))
 		go s.Mgr.SwitchInput(id, idx)
+	case "lowlatency":
+		var x models.Stream
+		if err = s.St.Get(models.KStream, id, &x); err == nil {
+			x.Transcode.LowLatency = r.URL.Query().Get("on") == "1"
+			s.St.Put(models.KStream, id, x)
+			s.St.Log("stream", id, "info", fmt.Sprintf("low latency set to %v", x.Transcode.LowLatency))
+			if s.Mgr.Status(id).State != "stopped" {
+				go s.Mgr.Restart(id)
+			}
+		}
 	case "clone":
 		var x models.Stream
 		if err = s.St.Get(models.KStream, id, &x); err == nil {

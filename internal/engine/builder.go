@@ -201,6 +201,24 @@ func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
 	return a
 }
 
+// mapList splits a comma separated map ("a:0, a:1", "m:language:eng") into
+// -map values; the special entry "-cc" asks to strip closed captions.
+func mapList(m, kind string) (specs []string, noCC bool) {
+	for _, x := range strings.Split(m, ",") {
+		switch x = strings.TrimSpace(x); x {
+		case "":
+		case "-cc":
+			noCC = true
+		default:
+			specs = append(specs, mapSpec(x, kind))
+		}
+	}
+	if len(specs) == 0 {
+		specs = []string{mapSpec("", kind)}
+	}
+	return
+}
+
 // mapSpec turns a user map like "0:v:0", "v:0", "#0x100", "p:1" into an ffmpeg -map value.
 func mapSpec(m, kind string) string {
 	m = strings.TrimSpace(m)
@@ -211,7 +229,16 @@ func mapSpec(m, kind string) string {
 		return "0:" + m
 	}
 	if strings.HasPrefix(m, "p:") {
+		if strings.Count(m, ":") >= 2 {
+			return "0:" + m
+		}
 		return "0:" + m + ":" + kind
+	}
+	if strings.HasPrefix(m, "i:") {
+		return "0:" + m
+	}
+	if strings.HasPrefix(m, "m:") {
+		return "0:" + kind + ":" + m
 	}
 	if !strings.Contains(m, ":") || strings.HasPrefix(m, kind+":") {
 		if _, err := strconv.Atoi(m); err == nil {
@@ -237,10 +264,17 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	if len(aenc) == 0 {
 		aenc = []models.AudioEnc{{Codec: "copy"}}
 	}
-	vmap := mapSpec(t.VideoMap, "v")
-	amap := mapSpec(t.AudioMap, "a")
-	if o.AudioInput > 0 && strings.HasPrefix(amap, "0:") {
-		amap = strconv.Itoa(o.AudioInput) + amap[1:]
+	vmaps, _ := mapList(t.VideoMap, "v")
+	vmap := vmaps[0]
+	amaps, _ := mapList(t.AudioMap, "a")
+	for i, am := range amaps {
+		if o.AudioInput > 0 && strings.HasPrefix(am, "0:") {
+			amaps[i] = strconv.Itoa(o.AudioInput) + am[1:]
+		}
+	}
+	smaps, subNoCC := mapList(t.SubMap, "s")
+	if strings.TrimSpace(t.SubMap) == "" || strings.TrimSpace(t.SubMap) == "-cc" {
+		smaps = nil
 	}
 
 	// ---- video filter graph
@@ -311,9 +345,9 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			pre = "[vov]"
 		}
 		if t.SubMode == "burn" {
-			sm := t.SubMap
-			if sm == "" {
-				sm = "0:s:0"
+			sm := "0:s:0"
+			if len(smaps) > 0 {
+				sm = smaps[0]
 			}
 			g = append(g, fmt.Sprintf("%s[%s]overlay=eof_action=pass[vsub]", pre, strings.TrimSuffix(sm, "?")))
 			pre = "[vsub]"
@@ -493,7 +527,9 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	if t.AudioDelay != 0 {
 		af = append(af, fmt.Sprintf("adelay=%d:all=1", t.AudioDelay))
 	}
-	for i, ae := range aenc {
+	// every mapped audio stream gets every audio encoder: out index = map*len(aenc)+encoder
+	for i := range len(amaps) * len(aenc) {
+		ae, amap := aenc[i%len(aenc)], amaps[i/len(aenc)]
 		ai := strconv.Itoa(i)
 		a = append(a, "-map", amap)
 		if ae.Codec == "copy" || ae.Codec == "" {
@@ -518,17 +554,18 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	extraA := 0
 	for i := range o.Inputs2 {
 		if o.AudioInput == 0 && strings.Contains(o.Inputs2[i], "audio") {
-			a = append(a, "-map", fmt.Sprintf("%d:a?", i+1), "-c:a:"+strconv.Itoa(len(aenc)+extraA), "copy")
+			a = append(a, "-map", fmt.Sprintf("%d:a?", i+1), "-c:a:"+strconv.Itoa(len(amaps)*len(aenc)+extraA), "copy")
 			extraA++
 		}
 	}
 	hasSubs := false
 	if t.SubMode == "copy" || t.SubMode == "webvtt" {
-		sm := t.SubMap
-		if sm == "" {
-			sm = "0:s?"
+		if len(smaps) == 0 {
+			smaps = []string{"0:s?"}
 		}
-		a = append(a, "-map", sm)
+		for _, sm := range smaps {
+			a = append(a, "-map", sm)
+		}
 		if t.SubMode == "webvtt" {
 			a = append(a, "-c:s", "webvtt")
 		} else {
@@ -549,7 +586,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	if t.ServiceProv != "" {
 		a = append(a, "-metadata", "service_provider="+t.ServiceProv)
 	}
-	if t.RemoveCC {
+	if t.RemoveCC || subNoCC {
 		a = append(a, "-a53cc", "0")
 	}
 	if s.MemMaxMB > 0 {
@@ -561,7 +598,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 
 	// ---- outputs via tee
 	nv_ := len(venc)
-	na := len(aenc) + extraA
+	na := len(amaps)*len(aenc) + extraA
 	var slaves []string
 	var variants []Variant
 	served := map[string]bool{}
@@ -594,6 +631,15 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		}
 		if len(as) == 0 {
 			as = seq(na)
+		} else if len(amaps) > 1 {
+			// output picks encoders; give it that encoder for every mapped audio stream
+			var x []int
+			for m := range amaps {
+				for _, e := range as {
+					x = append(x, m*len(aenc)+e)
+				}
+			}
+			as = x
 		}
 		hlsTime := out.HLSTime
 		if hlsTime == 0 {
