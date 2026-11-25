@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -579,6 +580,13 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 		running := false
 		var wrote uint64
 		var wroteAt time.Time
+		// ffmpeg's speed/fps are averages since start; show the last ~10s instead
+		type sample struct {
+			t      time.Time
+			ot, fr int64
+		}
+		var win []sample
+		var ot int64 = -1
 		for sc.Scan() {
 			mm := progRe.FindStringSubmatch(sc.Text())
 			if mm == nil {
@@ -594,8 +602,15 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 				}
 				p.st.Frames = n
 			case "fps":
-				p.st.FPS, _ = strconv.ParseFloat(v, 64)
+				if len(win) < 2 {
+					p.st.FPS, _ = strconv.ParseFloat(v, 64)
+				}
 			case "total_size", "out_time_us":
+				if k == "out_time_us" {
+					if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+						ot = n
+					}
+				}
 				if isCopy(&s.Transcode) {
 					p.last = time.Now()
 				}
@@ -604,8 +619,23 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 			case "dup_frames":
 				p.st.Dups, _ = strconv.ParseInt(v, 10, 64)
 			case "speed":
-				p.st.Speed, _ = strconv.ParseFloat(strings.TrimSuffix(v, "x"), 64)
+				if len(win) < 2 {
+					p.st.Speed, _ = strconv.ParseFloat(strings.TrimSuffix(v, "x"), 64)
+				}
 			case "progress":
+				if ot >= 0 {
+					now := time.Now()
+					win = append(win, sample{now, ot, p.st.Frames})
+					for len(win) > 2 && now.Sub(win[0].t) > 10*time.Second {
+						win = win[1:]
+					}
+					if a, b := win[0], win[len(win)-1]; len(win) >= 2 {
+						if dt := b.t.Sub(a.t).Seconds(); dt > 0 {
+							p.st.Speed = math.Round(float64(b.ot-a.ot)/1e6/dt*1000) / 1000
+							p.st.FPS = math.Round(float64(b.fr-a.fr)/dt*100) / 100
+						}
+					}
+				}
 				if w := sysmon.ProcWritten(cmd.Process.Pid); w > 0 {
 					if !wroteAt.IsZero() && w >= wrote {
 						if dt := time.Since(wroteAt).Seconds(); dt > 0 {

@@ -33,6 +33,11 @@ type splicer struct {
 	resync         bool
 	since          time.Time
 	dropped        int
+
+	// rate window: source media time vs wall time, and time spent blocked on ffmpeg
+	winT       time.Time
+	winTS, vTS int64
+	wait       time.Duration
 }
 
 var errWrite = errors.New("ffmpeg closed input")
@@ -52,6 +57,7 @@ func newSplicer(in, ua, ref, hdr, proxy string, idle time.Duration, log func(str
 	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.ResponseHeaderTimeout = idle
+	tr.DisableCompression = true
 	if proxy != "" {
 		if pu, err := url.Parse(proxy); err == nil {
 			tr.Proxy = http.ProxyURL(pu)
@@ -59,7 +65,7 @@ func newSplicer(in, ua, ref, hdr, proxy string, idle time.Duration, log func(str
 	}
 	return &splicer{url: in, ua: ua, ref: ref, hdr: hdr, idle: idle, log: log, hc: &http.Client{Transport: tr},
 		pmtPID: -1, vidPID: -1, last: map[int]int64{}, open: map[int]bool{}, keep: map[int]bool{},
-		overlap: map[int]bool{}, hold: map[int][]byte{}, holdTS: map[int]int64{}}
+		overlap: map[int]bool{}, hold: map[int][]byte{}, holdTS: map[int]int64{}, winTS: -1}
 }
 
 func (s *splicer) run(ctx context.Context, w io.Writer) {
@@ -77,6 +83,7 @@ func (s *splicer) run(ctx context.Context, w io.Writer) {
 		}
 		// the PES cut by the disconnect is incomplete: drop it, the resend has it whole
 		s.resync, s.since, s.dropped = true, time.Now(), 0
+		s.winT, s.winTS, s.wait = time.Now(), -1, 0
 		clear(s.open)
 		clear(s.overlap)
 		clear(s.hold)
@@ -97,9 +104,15 @@ func (s *splicer) once(ctx context.Context, w io.Writer) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// same request ffmpeg's http protocol sends; some panels pace other clients
+	req.Header.Set("User-Agent", "Lavf/60.16.100")
 	if s.ua != "" {
 		req.Header.Set("User-Agent", s.ua)
 	}
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("Range", "bytes=0-")
+	req.Header.Set("Icy-MetaData", "1")
+	req.Close = true
 	if s.ref != "" {
 		req.Header.Set("Referer", s.ref)
 	}
@@ -113,7 +126,7 @@ func (s *splicer) once(ctx context.Context, w io.Writer) (bool, error) {
 		return false, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != 200 && resp.StatusCode != 206 {
 		return false, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	wd := time.AfterFunc(s.idle, func() { resp.Body.Close() })
@@ -126,9 +139,11 @@ func (s *splicer) once(ctx context.Context, w io.Writer) (bool, error) {
 		if len(out) == 0 {
 			return nil
 		}
+		t0 := time.Now()
 		if _, err := w.Write(out); err != nil {
 			return errWrite
 		}
+		s.wait += time.Since(t0)
 		out = out[:0]
 		return nil
 	}
@@ -154,6 +169,13 @@ func (s *splicer) once(ctx context.Context, w io.Writer) (bool, error) {
 			pkt[187] = c
 		}
 		out = s.pass(pkt, out)
+		if el := time.Since(s.winT); el >= time.Minute {
+			if s.winTS >= 0 {
+				media := float64((s.vTS-s.winTS)&(1<<33-1)) / 90000
+				s.log(fmt.Sprintf("input: source %.2fx realtime, waiting on ffmpeg %.0f%%", media/el.Seconds(), 100*s.wait.Seconds()/el.Seconds()))
+			}
+			s.winT, s.winTS, s.wait = time.Now(), -1, 0
+		}
 		if len(out) >= cap(out) || (br.Buffered() < 188 && len(out) > 0) {
 			if err := flush(); err != nil {
 				return got, err
@@ -181,6 +203,12 @@ func (s *splicer) pass(p, out []byte) []byte {
 	}
 	if pusi {
 		ts, ok := pesTS(p)
+		if ok && pid == s.vidPID {
+			if s.winTS < 0 {
+				s.winTS = ts
+			}
+			s.vTS = ts
+		}
 		if !ok {
 			s.keep[pid] = true
 			return append(out, p...)
