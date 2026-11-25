@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -299,6 +300,9 @@ func (s *Server) hls(w http.ResponseWriter, r *http.Request) {
 		}
 		if d := strings.TrimPrefix(filepath.Dir(p), "/"); alias && d != "" {
 			b = prefixPlaylist(b, d+"/")
+		}
+		if alias || p == "/"+playlistOf(root) {
+			b = s.withSubs(r, id, b)
 		}
 		if tok != "" {
 			b = rewritePlaylist(b, "t="+tok)
@@ -850,6 +854,66 @@ func (s *Server) drmTrack(w http.ResponseWriter, r *http.Request) {
 	s.DRM.ServeTrack(w, r, pathID(r), k)
 }
 
+// subs serves the WebVTT subtitle renditions (original or live-translated) of a DRM stream.
+func (s *Server) subs(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	id := pathID(r)
+	if s.DRM == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if s.settings().SecurePlayback && !s.checkToken(id, r.URL.Query().Get("t")) && s.Auth.Account(r) == nil {
+		http.Error(w, "forbidden", 403)
+		return
+	}
+	track, file := r.PathValue("track"), r.PathValue("file")
+	if track == "" {
+		if !strings.HasSuffix(file, ".m3u8") {
+			http.NotFound(w, r)
+			return
+		}
+		track, file = strings.TrimSuffix(file, ".m3u8"), ""
+	}
+	s.DRM.ServeSubs(w, r, id, track, file)
+}
+
+// withSubs adds the DRM subtitle renditions to an HLS playlist; a media playlist
+// is wrapped in a master playlist that points back to itself with ?raw=1.
+func (s *Server) withSubs(r *http.Request, id int64, b []byte) []byte {
+	if s.DRM == nil || r.URL.Query().Get("raw") != "" {
+		return b
+	}
+	ts := s.DRM.SubTracks(r.Context(), id)
+	if len(ts) == 0 {
+		return b
+	}
+	var media strings.Builder
+	for i, t := range ts {
+		def, lang := "NO", t.Lang
+		if i == 0 {
+			def = "YES"
+		}
+		if lang == "" {
+			lang = "und"
+		}
+		fmt.Fprintf(&media, "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=%q,LANGUAGE=%q,DEFAULT=%s,AUTOSELECT=YES,URI=\"/subs/%d/%s.m3u8\"\n", t.Name, lang, def, id, t.ID)
+	}
+	if !bytes.Contains(b, []byte("#EXT-X-STREAM-INF")) {
+		return []byte("#EXTM3U\n#EXT-X-VERSION:3\n" + media.String() + "#EXT-X-STREAM-INF:BANDWIDTH=6000000,SUBTITLES=\"subs\"\n" + r.URL.Path + "?raw=1\n")
+	}
+	var out strings.Builder
+	for i, l := range strings.Split(strings.TrimRight(string(b), "\n"), "\n") {
+		if strings.HasPrefix(l, "#EXT-X-STREAM-INF") && !strings.Contains(l, "SUBTITLES=") {
+			l += `,SUBTITLES="subs"`
+		}
+		out.WriteString(l + "\n")
+		if i == 0 {
+			out.WriteString(media.String())
+		}
+	}
+	return []byte(out.String())
+}
+
 func outKind(t string) string {
 	switch t {
 	case "hls", "hls_master":
@@ -928,7 +992,7 @@ func (s *Server) streamOut(w http.ResponseWriter, r *http.Request) {
 	}
 	engine.TouchViewer(id, viewerKey(r))
 	engine.TouchDemand(id)
-	b = prefixPlaylist(b, pre)
+	b = s.withSubs(r, id, prefixPlaylist(b, pre))
 	if tok != "" {
 		b = rewritePlaylist(b, "t="+tok)
 	}

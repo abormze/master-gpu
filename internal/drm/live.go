@@ -79,6 +79,7 @@ type liveTrack struct {
 	ts    int64
 	segs  []seg
 	every time.Duration
+	pto   int64
 }
 
 func (t *liveTrack) url(s seg) string {
@@ -219,6 +220,10 @@ func parseLive(b []byte, final, kind, want string, now time.Time) (*liveTrack, e
 	if !ok {
 		return nil, fmt.Errorf("no %s track", kind)
 	}
+	return liveFrom(m, p, set, rep, final, kind, now)
+}
+
+func liveFrom(m mpdX, p periodX, set setX, rep repX, final, kind string, now time.Time) (*liveTrack, error) {
 	base, err := url.Parse(final)
 	if err != nil {
 		return nil, err
@@ -243,6 +248,7 @@ func parseLive(b []byte, final, kind, want string, now time.Time) (*liveTrack, e
 	if v, _ := strconv.ParseInt(t.Timescale, 10, 64); v > 0 {
 		lt.ts = v
 	}
+	lt.pto, _ = strconv.ParseInt(t.PTO, 10, 64)
 	num := int64(1)
 	if v, err := strconv.ParseInt(t.StartNumber, 10, 64); err == nil {
 		num = v
@@ -272,7 +278,7 @@ func parseLive(b []byte, final, kind, want string, now time.Time) (*liveTrack, e
 		if d <= 0 || err != nil {
 			return nil, fmt.Errorf("%s track: unsupported segment addressing", kind)
 		}
-		pto, _ := strconv.ParseInt(t.PTO, 10, 64)
+		pto := lt.pto
 		el := now.Sub(ast) - isoDur(p.Start)
 		last := num + int64(el.Seconds()*float64(lt.ts))/d - 2
 		for n := max(num, last-5); n <= last; n++ {

@@ -61,6 +61,11 @@ type Settings struct {
 	PublicHost     string   `json:"public_host"`
 	HTTPPort       int      `json:"http_port"`
 	StartupDelay   int      `json:"startup_delay"`
+	// live subtitle translation: google (free), libre, deepl, openai
+	TranslateProvider string `json:"translate_provider"`
+	TranslateURL      string `json:"translate_url"`
+	TranslateKey      string `json:"translate_key"`
+	TranslateModel    string `json:"translate_model"`
 }
 
 func DefaultSettings() Settings {

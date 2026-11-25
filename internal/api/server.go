@@ -274,6 +274,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /hls/{id}/{path...}", s.hls)
 	m.HandleFunc("GET /drm/{id}/manifest.mpd", s.drmManifest)
 	m.HandleFunc("GET /drm/{id}/track/{kind}", s.drmTrack)
+	m.HandleFunc("GET /subs/{id}/{file}", s.subs)
+	m.HandleFunc("GET /subs/{id}/{track}/{file}", s.subs)
 	m.HandleFunc("GET /live/{user}/{pass}/{file}", s.live)
 	m.HandleFunc("GET /ts/{id}", s.tsRelay)
 	m.HandleFunc("GET /stream/{id}/{file}", s.streamOut)

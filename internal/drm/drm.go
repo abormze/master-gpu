@@ -191,13 +191,16 @@ func (d *Service) Prep(ctx context.Context, s *models.Stream, input, root string
 		return nil, err
 	}
 	info := ParseMPD(body)
-	keys, err := d.resolveKeys(ctx, s, info)
-	if err != nil {
-		return nil, err
+	keys := map[string]string{}
+	plain := len(info.KIDs()) == 0 && len(info.PSSH) == 0 && len(s.DRMKeys) == 0
+	if !plain {
+		if keys, err = d.resolveKeys(ctx, s, info); err != nil {
+			return nil, err
+		}
 	}
 	vkey := pick(keys, info.KID("video"))
 	akey := pick(keys, info.KID("audio"))
-	if vkey == "" && akey == "" {
+	if vkey == "" && akey == "" && !plain {
 		return nil, fmt.Errorf("no key for KID %s", strings.Join(info.KIDs(), ","))
 	}
 	if vkey == "" {
@@ -215,7 +218,8 @@ func (d *Service) Prep(ctx context.Context, s *models.Stream, input, root string
 	t := &s.Transcode
 	sub := strings.ToLower(strings.TrimSpace(s.DRM.Subtitles))
 	wantSubs := sub != "" && sub != "none" && info.HasText
-	if !wantSubs && info.Has("video") {
+	if (!wantSubs || !s.DRM.SubBurn) && info.Has("video") {
+		// subtitles (and live translation) are served as WebVTT HLS renditions by the relay
 		// segment fetcher: video and audio as separate fMP4 inputs on one timeline
 		o := &engine.BuildOpts{Input: fmt.Sprintf("%s/drm/%d/track/video", d.LocalBase, s.ID), InputKeys: []string{vkey}, CopyTS: true}
 		if info.Has("audio") {
@@ -223,7 +227,7 @@ func (d *Service) Prep(ctx context.Context, s *models.Stream, input, root string
 			o.InputKeys = append(o.InputKeys, firstNonEmpty(akey, vkey))
 			o.AudioInput = 1
 		}
-		d.St.Log("stream", s.ID, "info", fmt.Sprintf("DRM ready: %d key(s), kids=%s, live segment fetcher", len(keys), strings.Join(info.KIDs(), ",")))
+		d.St.Log("stream", s.ID, "info", fmt.Sprintf("DRM ready: %d key(s), kids=%s, live segment fetcher, subtitles=%v", len(keys), strings.Join(info.KIDs(), ","), wantSubs))
 		return o, nil
 	}
 	local := fmt.Sprintf("%s/drm/%d/manifest.mpd", d.LocalBase, s.ID)
