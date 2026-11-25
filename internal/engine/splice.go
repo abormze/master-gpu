@@ -450,7 +450,16 @@ type pacer struct {
 	pre  []paceChunk
 	last atomic.Int64 // newest video DTS pushed, -1 none
 	held atomic.Int64 // ms of media queued behind the chunk being written
+
+	qMin time.Duration // smallest queue seen in the current backlogWin
+	qAt  time.Time
 }
+
+// backlogWin is how long a queue must stay above the jump threshold before the
+// pacer drops it. Some providers deliver live TS in bursts of several seconds
+// (segment relays); their queue drains to ~0 before every burst and must not
+// be mistaken for a backlog.
+var backlogWin = 15 * time.Second
 
 func newPacer(w io.Writer, lead time.Duration, log func(string)) *pacer {
 	return newPacerWith(w, lead, log, false, nil)
@@ -503,7 +512,7 @@ func (p *pacer) loop() {
 	var ts0 int64 = -1
 	// trim: keep the smallest backlog seen per window near keep; drop the rest
 	// by releasing up to 10% faster than real time, which ffmpeg absorbs evenly
-	const win, keep, step = 5 * time.Second, 300 * time.Millisecond, 500 * time.Millisecond
+	win, keep, step := backlogWin, 300*time.Millisecond, 500*time.Millisecond
 	minHeld, winAt := time.Duration(1<<62), time.Now()
 	var pend []paceChunk
 	if len(p.pre) > 0 {
@@ -663,8 +672,17 @@ func (p *pacer) liveStart() (pend []paceChunk, t0 time.Time, ts0 int64, ok bool)
 // jump skips to the newest keyframe once the queued input runs more than
 // 1.5s behind the live edge (a provider burst after connect or reconnect).
 func (p *pacer) jump(pend []paceChunk, t0 *time.Time, ts0 *int64) []paceChunk {
-	queued := span(pend)
-	if queued < 1500*time.Millisecond {
+	queued, now := span(pend), time.Now()
+	if p.qAt.IsZero() {
+		p.qAt, p.qMin = now, queued
+	}
+	p.qMin = min(p.qMin, queued)
+	if queued < 1500*time.Millisecond || now.Sub(p.qAt) < backlogWin {
+		return pend
+	}
+	low := p.qMin
+	p.qAt, p.qMin = now, queued
+	if low < 1500*time.Millisecond {
 		return pend
 	}
 	k := -1

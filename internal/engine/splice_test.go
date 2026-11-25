@@ -115,6 +115,8 @@ func TestPacer(t *testing.T) {
 }
 
 func TestPacerTrim(t *testing.T) {
+	defer func(w time.Duration) { backlogWin = w }(backlogWin)
+	backlogWin = 5 * time.Second
 	// a 2s backlog queued up front (provider connect burst), then real-time arrival
 	for _, trim := range []bool{false, true} {
 		w := &tsWriter{t0: time.Now()}
@@ -173,6 +175,8 @@ func TestPacerLiveStart(t *testing.T) {
 
 // A burst arriving mid-stream (reconnect) is skipped to its newest keyframe.
 func TestPacerJump(t *testing.T) {
+	defer func(w time.Duration) { backlogWin = w }(backlogWin)
+	backlogWin = time.Second
 	w := &dataWriter{}
 	p := newPacerWith(w, 0, func(string) {}, true, nil)
 	start := time.Now()
@@ -313,5 +317,36 @@ func TestPacerDiscontinuity(t *testing.T) {
 	}
 	if len(w.b) < n-60 {
 		t.Fatalf("wrote %d of %d chunks", len(w.b), n)
+	}
+}
+
+// A provider that delivers live media in bursts (a few seconds at once, then
+// nothing) is not behind live: the pacer must play it through without jumping.
+func TestPacerBursty(t *testing.T) {
+	defer func(w time.Duration) { backlogWin = w }(backlogWin)
+	backlogWin = 3 * time.Second
+	w := &dataWriter{}
+	var jumps atomic.Int64
+	p := newPacerWith(w, 0, func(m string) {
+		if strings.Contains(m, "jumped") {
+			jumps.Add(1)
+		}
+	}, true, nil)
+	start := time.Now()
+	var ts int64
+	for burst := 0; burst < 5; burst++ {
+		time.Sleep(time.Until(start.Add(time.Duration(burst) * 2 * time.Second)))
+		for end := ts + 2*90000; ts < end; ts += 1800 {
+			key, psi := -1, []byte(nil)
+			if ts%(90000/2) == 0 {
+				key, psi = 1, []byte{9}
+			}
+			p.pushKey([]byte{0, 1}, ts, key, psi)
+		}
+	}
+	time.Sleep(2 * time.Second)
+	p.close()
+	if n := jumps.Load(); n > 0 {
+		t.Fatalf("%d jumps on a bursty but live source", n)
 	}
 }
