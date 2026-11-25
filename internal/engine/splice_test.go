@@ -3,6 +3,7 @@ package engine
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -348,5 +349,51 @@ func TestPacerBursty(t *testing.T) {
 	p.close()
 	if n := jumps.Load(); n > 0 {
 		t.Fatalf("%d jumps on a bursty but live source", n)
+	}
+}
+
+type mediaWriter struct {
+	mu sync.Mutex
+	t0 time.Time
+	d  []time.Duration // wall - media per chunk
+}
+
+func (w *mediaWriter) Write(b []byte) (int, error) {
+	ts := int64(binary.BigEndian.Uint64(b))
+	w.mu.Lock()
+	w.d = append(w.d, time.Since(w.t0)-time.Duration(ts)*time.Second/90000)
+	w.mu.Unlock()
+	return len(b), nil
+}
+
+// A relay that sends each second of media in one burst, part of it late, must
+// come out at a steady delay, not stall-then-fast-forward every burst.
+func TestPacerLateBursts(t *testing.T) {
+	w := &mediaWriter{t0: time.Now()}
+	p := newPacerWith(w, 0, func(string) {}, false, nil)
+	const fr = 1800
+	var ts int64
+	push := func(end int64) {
+		for ; ts < end; ts += fr {
+			b := make([]byte, 8)
+			binary.BigEndian.PutUint64(b, uint64(ts))
+			p.push(b, ts)
+		}
+	}
+	push(36000) // 0.4s
+	for k := int64(1); k <= 6; k++ {
+		time.Sleep(time.Until(w.t0.Add(time.Duration(k) * time.Second)))
+		push(k*90000 + 36000) // media up to k+0.4s; k-0.6..k arrives late
+	}
+	time.Sleep(600 * time.Millisecond)
+	p.close()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	lo, hi := time.Duration(1<<62), time.Duration(-1<<62)
+	for _, d := range w.d[len(w.d)/2:] {
+		lo, hi = min(lo, d), max(hi, d)
+	}
+	if hi-lo > 150*time.Millisecond {
+		t.Fatalf("output delay swings %v..%v", lo, hi)
 	}
 }

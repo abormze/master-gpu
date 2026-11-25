@@ -461,6 +461,10 @@ type pacer struct {
 // be mistaken for a backlog.
 var backlogWin = 15 * time.Second
 
+// lateTol is how late a chunk may reach the pacer and still be released at
+// once; later chunks move the timeline instead of bursting into ffmpeg.
+const lateTol = 150 * time.Millisecond
+
 func newPacer(w io.Writer, lead time.Duration, log func(string)) *pacer {
 	return newPacerWith(w, lead, log, false, nil)
 }
@@ -538,12 +542,21 @@ func (p *pacer) loop() {
 		}
 	}
 	for {
+		// starved: the pacer had to wait for this chunk, so any lateness is
+		// the source's, not trim releasing queued media early
+		starved := false
 		if len(pend) == 0 {
 			select {
 			case x := <-p.ch:
 				pend = append(pend, x)
-			case <-p.stop:
-				return
+			default:
+				starved = true
+				select {
+				case x := <-p.ch:
+					pend = append(pend, x)
+				case <-p.stop:
+					return
+				}
 			}
 		}
 		if p.trim {
@@ -585,9 +598,16 @@ func (p *pacer) loop() {
 				// timeline jump (new programme, provider clock reset): rebase
 				p.log(fmt.Sprintf("input: timestamp jump %+.1fs, pacing rebased", (media - now.Sub(t0)).Seconds()))
 				t0, ts0 = now, c.ts
-			case wait < -p.lead-2*time.Second && !c.fast:
-				// source fell behind: don't replay the gap as a burst later
+			case wait < -p.lead-2*time.Second && !c.fast && !starved:
 				t0 = now.Add(-media)
+			case wait < -lateTol && !c.fast && starved:
+				// source delivered late (burst relay gap, reconnect): shift the
+				// timeline by the lateness instead of fast-forwarding to catch up,
+				// so output keeps a steady 1x; trim pulls back unneeded delay
+				t0 = t0.Add(-wait)
+				if -wait >= time.Second {
+					p.log(fmt.Sprintf("input: source %.1fs late, output delay raised to absorb it", (-wait).Seconds()))
+				}
 			case wait > 0:
 				select {
 				case <-time.After(wait):
