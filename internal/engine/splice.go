@@ -38,6 +38,13 @@ type splicer struct {
 	winT       time.Time
 	winTS, vTS int64
 	wait       time.Duration
+	haveTS     bool
+
+	// pace releases input to ffmpeg at the source's real-time rate (video DTS
+	// against wall clock), at most this far ahead; 0 passes bursts straight on.
+	// Providers deliver in bursts, which made ffmpeg decode and NVENC encode
+	// in bursts: ENC jumping 0%..100% and speed swinging around 1x.
+	pace time.Duration
 }
 
 var errWrite = errors.New("ffmpeg closed input")
@@ -65,10 +72,15 @@ func newSplicer(in, ua, ref, hdr, proxy string, idle time.Duration, log func(str
 	}
 	return &splicer{url: in, ua: ua, ref: ref, hdr: hdr, idle: idle, log: log, hc: &http.Client{Transport: tr},
 		pmtPID: -1, vidPID: -1, last: map[int]int64{}, open: map[int]bool{}, keep: map[int]bool{},
-		overlap: map[int]bool{}, hold: map[int][]byte{}, holdTS: map[int]int64{}, winTS: -1}
+		overlap: map[int]bool{}, hold: map[int][]byte{}, holdTS: map[int]int64{}, winTS: -1, pace: 700 * time.Millisecond}
 }
 
 func (s *splicer) run(ctx context.Context, w io.Writer) {
+	if s.pace > 0 {
+		p := newPacer(w, s.pace, s.log)
+		defer p.close()
+		w = p
+	}
 	fails := 0
 	for ctx.Err() == nil {
 		got, err := s.once(ctx, w)
@@ -140,7 +152,17 @@ func (s *splicer) once(ctx context.Context, w io.Writer) (bool, error) {
 			return nil
 		}
 		t0 := time.Now()
-		if _, err := w.Write(out); err != nil {
+		var err error
+		if p, ok := w.(*pacer); ok {
+			ts := int64(-1)
+			if s.haveTS {
+				ts = s.vTS
+			}
+			err = p.push(out, ts)
+		} else {
+			_, err = w.Write(out)
+		}
+		if err != nil {
 			return errWrite
 		}
 		s.wait += time.Since(t0)
@@ -207,7 +229,7 @@ func (s *splicer) pass(p, out []byte) []byte {
 			if s.winTS < 0 {
 				s.winTS = ts
 			}
-			s.vTS = ts
+			s.vTS, s.haveTS = ts, true
 		}
 		if !ok {
 			s.keep[pid] = true
@@ -290,4 +312,91 @@ func pesTS(p []byte) (int64, bool) {
 
 func tsval(b []byte) int64 {
 	return int64(b[0]>>1&7)<<30 | int64(b[1])<<22 | int64(b[2]>>1)<<15 | int64(b[3])<<7 | int64(b[4]>>1)
+}
+
+type paceChunk struct {
+	b  []byte
+	ts int64 // 90kHz video DTS, -1 = unknown
+}
+
+// pacer decouples reading the source from feeding ffmpeg: the network side
+// never blocks, and chunks reach ffmpeg no earlier than their media time.
+type pacer struct {
+	w    io.Writer
+	lead time.Duration
+	log  func(string)
+	ch   chan paceChunk
+	done chan struct{}
+	stop chan struct{}
+	err  error
+}
+
+func newPacer(w io.Writer, lead time.Duration, log func(string)) *pacer {
+	p := &pacer{w: w, lead: lead, log: log, ch: make(chan paceChunk, 8192), done: make(chan struct{}), stop: make(chan struct{})}
+	go p.loop()
+	return p
+}
+
+func (p *pacer) Write(b []byte) (int, error) { return len(b), p.push(b, -1) }
+
+func (p *pacer) push(b []byte, ts int64) error {
+	select {
+	case <-p.done:
+		return errWrite
+	default:
+	}
+	select {
+	case p.ch <- paceChunk{append([]byte(nil), b...), ts}:
+		return nil
+	case <-p.done:
+		return errWrite
+	}
+}
+
+func (p *pacer) close() {
+	close(p.stop)
+	<-p.done
+}
+
+func (p *pacer) loop() {
+	defer close(p.done)
+	const mask = 1<<33 - 1
+	var t0 time.Time
+	var ts0 int64 = -1
+	for {
+		var c paceChunk
+		select {
+		case c = <-p.ch:
+		case <-p.stop:
+			return
+		}
+		if c.ts >= 0 {
+			now := time.Now()
+			if ts0 < 0 {
+				t0, ts0 = now, c.ts
+			}
+			d := (c.ts - ts0) & mask
+			media := time.Duration(d) * time.Second / 90000
+			wait := t0.Add(media).Sub(now) - p.lead
+			switch {
+			case d > mask/2 || wait > 5*time.Second:
+				// timeline jump (new programme, provider clock reset): rebase
+				p.log(fmt.Sprintf("input: timestamp jump %+.1fs, pacing rebased", (media - now.Sub(t0)).Seconds()))
+				t0, ts0 = now, c.ts
+			case wait < -p.lead-2*time.Second:
+				// source fell behind: don't replay the gap as a burst later
+				t0 = now.Add(-media)
+			case wait > 0:
+				select {
+				case <-time.After(wait):
+				case <-p.stop:
+					return
+				}
+			}
+		}
+		if _, err := p.w.Write(c.b); err != nil {
+			p.err = err
+			return
+		}
+	}
 }

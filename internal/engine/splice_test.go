@@ -45,6 +45,7 @@ func TestSplicerOverlap(t *testing.T) {
 	defer srv.Close()
 	var logs []string
 	sp := newSplicer(srv.URL+"/live.ts", "", "", "", "", 5*time.Second, func(s string) { logs = append(logs, s) })
+	sp.pace = 0
 	var buf bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -73,5 +74,41 @@ func TestSplicerOverlap(t *testing.T) {
 	t.Log(n, "frames,", logs[0])
 	if b, _ := exec.Command("ffmpeg", "-v", "error", "-i", out, "-f", "null", "-").CombinedOutput(); len(b) > 0 {
 		t.Log("decode:", string(b))
+	}
+}
+
+type tsWriter struct {
+	at []time.Duration
+	t0 time.Time
+}
+
+func (w *tsWriter) Write(b []byte) (int, error) {
+	w.at = append(w.at, time.Since(w.t0))
+	return len(b), nil
+}
+
+// The pacer must hold chunks until their media time (minus the lead), pass
+// unknown-timestamp chunks straight on, and rebase on a timeline jump.
+func TestPacer(t *testing.T) {
+	w := &tsWriter{t0: time.Now()}
+	p := newPacer(w, 200*time.Millisecond, func(string) {})
+	for i := 0; i <= 10; i++ {
+		p.push([]byte{1}, int64(i)*9000) // 0..1s of media at once
+	}
+	p.push([]byte{2}, 3600*90000) // 1h jump: no 1h wait
+	p.push([]byte{3}, 3600*90000+9000)
+	deadline := time.Now().Add(3 * time.Second)
+	for len(w.at) < 13 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	p.close()
+	if len(w.at) != 13 {
+		t.Fatalf("wrote %d chunks", len(w.at))
+	}
+	if w.at[0] > 50*time.Millisecond || w.at[10] < 750*time.Millisecond || w.at[10] > 1100*time.Millisecond {
+		t.Fatalf("pacing off: first %v, 1s-media chunk %v", w.at[0], w.at[10])
+	}
+	if w.at[11]-w.at[10] > 100*time.Millisecond {
+		t.Fatalf("waited %v on a timestamp jump", w.at[11]-w.at[10])
 	}
 }
