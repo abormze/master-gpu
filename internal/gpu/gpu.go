@@ -230,6 +230,22 @@ func (m *Monitor) poll() {
 		}
 	}
 	m.pids = pids
+	// NVML's card-wide encoder/decoder figure is sampled over a short window
+	// and reads 0% about a third of the time under steady load; the per-process
+	// figures cover the same work without those gaps
+	for i := range info.Cards {
+		c := &info.Cards[i]
+		var e, d float64
+		n := 0
+		for _, u := range pids {
+			if u.GPU == c.Index {
+				e, d, n = e+u.Enc, d+u.Dec, n+1
+			}
+		}
+		if n > 0 {
+			c.Enc, c.Dec = math.Round(min(e, 100)), math.Round(min(d, 100))
+		}
+	}
 	m.info = info
 	m.mu.Unlock()
 }

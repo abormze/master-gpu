@@ -167,10 +167,12 @@ func (s *splicer) attach(ctx context.Context, w io.Writer) {
 func (s *splicer) loop(ctx context.Context, w io.Writer) {
 	fails := 0
 	for ctx.Err() == nil {
+		at := time.Now()
 		got, err := s.once(ctx, w)
 		if errors.Is(err, errWrite) || ctx.Err() != nil {
 			return
 		}
+		s.log(fmt.Sprintf("input: source connection ended after %s: %v", time.Since(at).Round(time.Second), err))
 		if got {
 			fails = 0
 		} else if fails++; fails > 5 {
