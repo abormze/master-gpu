@@ -331,6 +331,9 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			if uploadBack && !cpuE {
 				f = append(f, "hwupload_cuda")
 			}
+			if v.FPS != "" && v.Codec != "copy" {
+				f = append(f, "fps="+v.FPS)
+			}
 			if v.Size != "" && v.Codec != "copy" {
 				w, h := splitSize(v.Size)
 				switch {
@@ -437,12 +440,21 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			}
 		}
 		if t.GOP > 0 {
-			a = append(a, "-g:v:"+vi, strconv.Itoa(t.GOP), "-keyint_min:v:"+vi, strconv.Itoa(t.GOP))
+			gop := t.GOP
+			// keep the keyframe interval in seconds equal across qualities
+			if vf, _ := strconv.ParseFloat(v.FPS, 64); vf > 0 {
+				if rf, _ := strconv.ParseFloat(t.FrameRate, 64); rf > 0 {
+					gop = max(1, int(float64(gop)*vf/rf+0.5))
+				}
+			}
+			a = append(a, "-g:v:"+vi, strconv.Itoa(gop), "-keyint_min:v:"+vi, strconv.Itoa(gop))
 		}
 		if vnv {
 			a = append(a, "-bf:v:"+vi, strconv.Itoa(t.BFrames), "-forced-idr:v:"+vi, "1")
 		}
-		if fullHW && t.FrameRate != "" {
+		if v.FPS != "" && v.Codec != "copy" {
+			a = append(a, "-r:v:"+vi, v.FPS)
+		} else if fullHW && t.FrameRate != "" {
 			a = append(a, "-r:v:"+vi, t.FrameRate)
 		}
 		for k, val := range map[string]string{"color_range": t.ColorRange, "colorspace": t.ColorSpace, "color_primaries": t.ColorPrim, "color_trc": t.ColorTRC} {

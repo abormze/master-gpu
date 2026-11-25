@@ -111,6 +111,7 @@ type VideoEnc struct {
 	CQ      int    `json:"cq"`
 	Name    string `json:"name"`   // variant label e.g. FHD
 	Device  string `json:"device"` // "" = stream hwaccel, "cpu" = encode on CPU to offload NVENC
+	FPS     string `json:"fps"`    // per-quality frame rate, e.g. 25 for HD/SD while FHD stays 50
 }
 
 type AudioEnc struct {

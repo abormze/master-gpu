@@ -95,7 +95,7 @@ const XO = {
   out: opts(["hls", "HLS"], ["hls_master", "HLS-Master"], ["http", "HTTP"], ["rtmp", "RTMP"], ["rtmp_push", "RTMP-Push"], ["dash", "Dash"], ["rtsp", "RTSP"], ["rtp", "RTP"], ["udp", "UDP"], ["tcp", "TCP"], ["srt", "SRT"], ["srt_listener", "SRT Listener"], ["file", "FILE"]),
   sizes: ["3840x2160", "2560x1440", "1920x1080", "1600x900", "1280x720", "1024x576", "960x540", "854x480", "720x576", "720x480", "640x360", "480x270"]
 };
-const XVENC = [F.s("codec", "codec", XO.vcodec), F.s("device", "device", opts(["", "GPU"], ["cpu", "CPU"]), { hint: "CPU = offload this quality from NVENC to the server CPU|CPU = ترميز هالجودة على معالج السيرفر لتخفيف NVENC" }), F.t("size", "size", { ph: "Auto", dl: XO.sizes }), F.s("rc", "rc", opts(["cbr", "CBR"], ["vbr", "VBR"], ["cq", "CQ"])), F.n("bitrate", "bitrate kbps"), F.n("maxrate", "max bitrate kbps", { ph: "auto" }), F.n("cq", "CQ", { ph: "23" })];
+const XVENC = [F.s("codec", "codec", XO.vcodec), F.s("device", "device", opts(["", "GPU"], ["cpu", "CPU"]), { hint: "CPU = offload this quality from NVENC to the server CPU|CPU = ترميز هالجودة على معالج السيرفر لتخفيف NVENC" }), F.t("size", "size", { ph: "Auto", dl: XO.sizes }), F.t("fps", "fps", { ph: "Auto", dl: ["25", "30", "50", "60"], hint: "Lower fps for small qualities saves NVENC|تنزيل fps للجودات الصغيرة بيخفف NVENC" }), F.s("rc", "rc", opts(["cbr", "CBR"], ["vbr", "VBR"], ["cq", "CQ"])), F.n("bitrate", "bitrate kbps"), F.n("maxrate", "max bitrate kbps", { ph: "auto" }), F.n("cq", "CQ", { ph: "23" })];
 const XVENCM = [F.t("name", "label", { ph: "FHD" })];
 const RCF = { cbr: ["bitrate"], vbr: ["bitrate", "maxrate"], cq: ["cq", "maxrate"] };
 const XAENC = [F.s("codec", "codec", XO.acodec), F.n("bitrate", "bitrate kbps")];
