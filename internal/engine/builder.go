@@ -100,7 +100,10 @@ func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
 	if u != nil {
 		scheme = strings.ToLower(u.Scheme)
 	}
-	if s.RateEmu || scheme == "" || scheme == "file" {
+	// DRM segment tracks arrive one whole segment at a time: read them at real
+	// time so the output stays smooth instead of bursting per segment
+	re := s.RateEmu || scheme == "" || scheme == "file" || o.CopyTS
+	if re {
 		a = append(a, "-re")
 	}
 	ff := "+genpts+discardcorrupt"
@@ -189,6 +192,9 @@ func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
 	for i, x := range o.Inputs2 {
 		if i+1 < len(o.InputKeys) && o.InputKeys[i+1] != "" {
 			a = append(a, keyOpt, o.InputKeys[i+1])
+		}
+		if o.CopyTS {
+			a = append(a, "-re")
 		}
 		a = append(a, "-thread_queue_size", "1024", "-i", x)
 	}

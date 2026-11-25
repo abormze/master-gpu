@@ -49,6 +49,9 @@ type splicer struct {
 	// trim lets the pacer catch up when it holds more than it needs (low latency)
 	trim bool
 	pc   atomic.Pointer[pacer]
+	// latest PAT/PMT and the offset in the pending output of the last video keyframe
+	pat, pmt []byte
+	keyAt    int
 }
 
 var errWrite = errors.New("ffmpeg closed input")
@@ -76,7 +79,7 @@ func newSplicer(in, ua, ref, hdr, proxy string, idle time.Duration, log func(str
 	}
 	return &splicer{url: in, ua: ua, ref: ref, hdr: hdr, idle: idle, log: log, hc: &http.Client{Transport: tr},
 		pmtPID: -1, vidPID: -1, last: map[int]int64{}, open: map[int]bool{}, keep: map[int]bool{},
-		overlap: map[int]bool{}, hold: map[int][]byte{}, holdTS: map[int]int64{}, winTS: -1, pace: 700 * time.Millisecond}
+		overlap: map[int]bool{}, hold: map[int][]byte{}, holdTS: map[int]int64{}, winTS: -1, keyAt: -1, pace: 700 * time.Millisecond}
 }
 
 func (s *splicer) run(ctx context.Context, w io.Writer) {
@@ -164,7 +167,11 @@ func (s *splicer) once(ctx context.Context, w io.Writer) (bool, error) {
 			if s.haveTS {
 				ts = s.vTS
 			}
-			err = p.push(out, ts)
+			var psi []byte
+			if s.keyAt >= 0 && s.pat != nil && s.pmt != nil {
+				psi = append(append([]byte(nil), s.pat...), s.pmt...)
+			}
+			err = p.pushKey(out, ts, s.keyAt, psi)
 		} else {
 			_, err = w.Write(out)
 		}
@@ -172,7 +179,7 @@ func (s *splicer) once(ctx context.Context, w io.Writer) (bool, error) {
 			return errWrite
 		}
 		s.wait += time.Since(t0)
-		out = out[:0]
+		out, s.keyAt = out[:0], -1
 		return nil
 	}
 	skipped := 0
@@ -221,10 +228,12 @@ func (s *splicer) pass(p, out []byte) []byte {
 		if pusi && pid == 0 {
 			if pm := patPMT(p); pm > 0 {
 				s.pmtPID = pm
+				s.pat = append(s.pat[:0], p...)
 			}
 		} else if pusi && pid == s.pmtPID {
 			if v := pmtVideo(p); v > 0 {
 				s.vidPID = v
+				s.pmt = append(s.pmt[:0], p...)
 			}
 		}
 		return append(out, p...)
@@ -263,6 +272,9 @@ func (s *splicer) pass(p, out []byte) []byte {
 		s.keep[pid] = keep
 		if keep {
 			if h := s.hold[pid]; len(h) > 0 {
+				if pid == s.vidPID && h[3]&0x20 != 0 && h[4] > 0 && h[5]&0x40 != 0 {
+					s.keyAt = len(out)
+				}
 				out = append(out, h...)
 				s.last[pid] = s.holdTS[pid]
 			}
@@ -329,8 +341,12 @@ func (s *splicer) buffered() int64 {
 }
 
 type paceChunk struct {
-	b  []byte
-	ts int64 // 90kHz video DTS, -1 = unknown
+	b   []byte
+	ts  int64  // 90kHz video DTS, -1 = unknown
+	key int    // offset of a video keyframe in b, -1 none
+	psi []byte // PAT+PMT to prepend when starting at key
+	// fast: backlog released at once after a live-edge jump
+	fast bool
 }
 
 // pacer decouples reading the source from feeding ffmpeg: the network side
@@ -357,7 +373,9 @@ func newPacer(w io.Writer, lead time.Duration, log func(string)) *pacer {
 
 func (p *pacer) Write(b []byte) (int, error) { return len(b), p.push(b, -1) }
 
-func (p *pacer) push(b []byte, ts int64) error {
+func (p *pacer) push(b []byte, ts int64) error { return p.pushKey(b, ts, -1, nil) }
+
+func (p *pacer) pushKey(b []byte, ts int64, key int, psi []byte) error {
 	select {
 	case <-p.done:
 		return errWrite
@@ -367,7 +385,7 @@ func (p *pacer) push(b []byte, ts int64) error {
 		p.last.Store(ts)
 	}
 	select {
-	case p.ch <- paceChunk{append([]byte(nil), b...), ts}:
+	case p.ch <- paceChunk{b: append([]byte(nil), b...), ts: ts, key: key, psi: psi}:
 		return nil
 	case <-p.done:
 		return errWrite
@@ -385,16 +403,38 @@ func (p *pacer) loop() {
 	var t0 time.Time
 	var ts0 int64 = -1
 	// trim: keep the smallest backlog seen per window near keep; drop the rest
-	// by releasing up to 5% faster than real time, which ffmpeg absorbs evenly
-	const win, keep, step = 5 * time.Second, 300 * time.Millisecond, 250 * time.Millisecond
+	// by releasing up to 10% faster than real time, which ffmpeg absorbs evenly
+	const win, keep, step = 5 * time.Second, 300 * time.Millisecond, 500 * time.Millisecond
 	minHeld, winAt := time.Duration(1<<62), time.Now()
-	for {
-		var c paceChunk
-		select {
-		case c = <-p.ch:
-		case <-p.stop:
+	var pend []paceChunk
+	if p.trim {
+		var ok bool
+		if pend, t0, ts0, ok = p.liveStart(); !ok {
 			return
 		}
+	}
+	for {
+		if len(pend) == 0 {
+			select {
+			case x := <-p.ch:
+				pend = append(pend, x)
+			case <-p.stop:
+				return
+			}
+		}
+		if p.trim {
+			for drained := false; !drained; {
+				select {
+				case x := <-p.ch:
+					pend = append(pend, x)
+				default:
+					drained = true
+				}
+			}
+			pend = p.jump(pend, &t0, &ts0)
+		}
+		c := pend[0]
+		pend = pend[1:]
 		if c.ts >= 0 {
 			now := time.Now()
 			if ts0 < 0 {
@@ -421,7 +461,7 @@ func (p *pacer) loop() {
 				// timeline jump (new programme, provider clock reset): rebase
 				p.log(fmt.Sprintf("input: timestamp jump %+.1fs, pacing rebased", (media - now.Sub(t0)).Seconds()))
 				t0, ts0 = now, c.ts
-			case wait < -p.lead-2*time.Second:
+			case wait < -p.lead-2*time.Second && !c.fast:
 				// source fell behind: don't replay the gap as a burst later
 				t0 = now.Add(-media)
 			case wait > 0:
@@ -437,4 +477,107 @@ func (p *pacer) loop() {
 			return
 		}
 	}
+}
+
+// liveStart swallows the backlog a provider sends on connect (often tens of
+// seconds) and starts ffmpeg on the newest keyframe in it, so the output runs
+// at the live edge instead of replaying that backlog at real time forever.
+func (p *pacer) liveStart() (pend []paceChunk, t0 time.Time, ts0 int64, ok bool) {
+	const mask = 1<<33 - 1
+	media := func(d int64) time.Duration { return time.Duration(d&mask) * time.Second / 90000 }
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+	start := time.Now()
+	var w0, grew time.Time
+	var f0, last int64 = -1, -1
+	var ahead time.Duration
+	for {
+		select {
+		case c := <-p.ch:
+			pend = append(pend, c)
+			if c.ts >= 0 {
+				now := time.Now()
+				if f0 < 0 {
+					w0, f0, grew = now, c.ts, now
+				}
+				last = c.ts
+				if a := media(c.ts-f0) - now.Sub(w0); a > ahead+200*time.Millisecond && a < time.Hour {
+					ahead, grew = a, now
+				}
+			}
+		case <-tick.C:
+		case <-p.stop:
+			return nil, t0, ts0, false
+		}
+		if el := time.Since(start); f0 >= 0 && time.Since(grew) >= time.Second || el >= 10*time.Second {
+			break
+		}
+	}
+	k := -1
+	for i := len(pend) - 1; i >= 0; i-- {
+		if pend[i].key >= 0 && pend[i].psi != nil {
+			k = i
+			break
+		}
+	}
+	if k < 0 {
+		return pend, time.Now(), -1, true
+	}
+	c := pend[k]
+	skipped := media(c.ts - f0)
+	c.b = append(c.psi, c.b[c.key:]...)
+	pend = append([]paceChunk{c}, pend[k+1:]...)
+	for i := range pend {
+		pend[i].fast = true
+	}
+	ts0 = -1
+	for _, x := range pend {
+		if x.ts >= 0 {
+			ts0 = x.ts
+			break
+		}
+	}
+	t0 = time.Now()
+	if ts0 >= 0 && last >= 0 {
+		t0 = t0.Add(-media(last - ts0))
+	}
+	p.log(fmt.Sprintf("input: started at live edge, skipped %.1fs of provider backlog", skipped.Seconds()))
+	return pend, t0, ts0, true
+}
+
+// jump skips to the newest keyframe once the queued input runs more than
+// 1.5s behind the live edge (a provider burst after connect or reconnect).
+func (p *pacer) jump(pend []paceChunk, t0 *time.Time, ts0 *int64) []paceChunk {
+	const mask = 1<<33 - 1
+	media := func(d int64) time.Duration { return time.Duration(d&mask) * time.Second / 90000 }
+	newest, head := p.last.Load(), int64(-1)
+	for _, c := range pend {
+		if c.ts >= 0 {
+			head = c.ts
+			break
+		}
+	}
+	if newest < 0 || head < 0 || media(newest-head) < 1500*time.Millisecond || media(newest-head) > time.Hour {
+		return pend
+	}
+	k := -1
+	for i := len(pend) - 1; i > 0; i-- {
+		if pend[i].key >= 0 && pend[i].psi != nil {
+			k = i
+			break
+		}
+	}
+	if k < 0 || pend[k].ts < 0 || media(pend[k].ts-head) < 500*time.Millisecond || media(pend[k].ts-head) > time.Hour {
+		return pend
+	}
+	c := pend[k]
+	p.log(fmt.Sprintf("input: %.1fs behind live, jumped to newest keyframe", media(newest-head).Seconds()))
+	c.b = append(c.psi, c.b[c.key:]...)
+	pend = append(pend[:0], pend[k:]...)
+	pend[0] = c
+	for i := range pend {
+		pend[i].fast = true
+	}
+	*t0, *ts0 = time.Now().Add(-media(newest-c.ts)), c.ts
+	return pend
 }

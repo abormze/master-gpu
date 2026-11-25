@@ -136,3 +136,71 @@ func TestPacerTrim(t *testing.T) {
 		t.Logf("trim=%v held %dms", trim, held)
 	}
 }
+
+type dataWriter struct{ b [][]byte }
+
+func (w *dataWriter) Write(b []byte) (int, error) {
+	w.b = append(w.b, append([]byte(nil), b...))
+	return len(b), nil
+}
+
+// A connect backlog is dropped up to its newest keyframe, which starts with PAT/PMT.
+func TestPacerLiveStart(t *testing.T) {
+	w := &dataWriter{}
+	p := newPacer(w, 0, func(string) {})
+	p.trim = true
+	var ts int64
+	for ; ts < 4*90000; ts += 1800 { // 4s burst, keyframe every 1s
+		key, psi := -1, []byte(nil)
+		if ts%90000 == 0 {
+			key, psi = 1, []byte{9}
+		}
+		p.pushKey([]byte{0, byte(ts / 90000)}, ts, key, psi)
+	}
+	start := time.Now()
+	for ts0 := ts; time.Since(start) < 3*time.Second; ts += 1800 {
+		time.Sleep(time.Until(start.Add(time.Duration(ts-ts0) * time.Second / 90000)))
+		p.push([]byte{0, 7}, ts)
+	}
+	held := p.held.Load()
+	p.close()
+	if len(w.b) == 0 || len(w.b[0]) != 2 || w.b[0][0] != 9 || w.b[0][1] != 3 {
+		t.Fatalf("first write %v, want PSI + keyframe at 3s", w.b[0])
+	}
+	if held > 400 {
+		t.Fatalf("held %dms after live start", held)
+	}
+}
+
+// A burst arriving mid-stream (reconnect) is skipped to its newest keyframe.
+func TestPacerJump(t *testing.T) {
+	w := &dataWriter{}
+	p := newPacer(w, 0, func(string) {})
+	p.trim = true
+	start := time.Now()
+	var ts int64
+	push := func(n int64) {
+		for end := ts + n; ts < end; ts += 1800 {
+			key, psi := -1, []byte(nil)
+			if ts%90000 == 0 {
+				key, psi = 1, []byte{9}
+			}
+			p.pushKey([]byte{0, 1}, ts, key, psi)
+		}
+	}
+	for ts < 2*90000 { // 2s real time
+		time.Sleep(time.Until(start.Add(time.Duration(ts) * time.Second / 90000)))
+		push(1800)
+	}
+	push(5 * 90000) // 5s burst
+	off := ts - 2*90000
+	for time.Since(start) < 5*time.Second {
+		time.Sleep(time.Until(start.Add(time.Duration(ts-off) * time.Second / 90000)))
+		push(1800)
+	}
+	held := p.held.Load()
+	p.close()
+	if held > 1000 {
+		t.Fatalf("held %dms after mid-stream burst", held)
+	}
+}
