@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -117,8 +118,7 @@ func TestPacerTrim(t *testing.T) {
 	// a 2s backlog queued up front (provider connect burst), then real-time arrival
 	for _, trim := range []bool{false, true} {
 		w := &tsWriter{t0: time.Now()}
-		p := newPacer(w, 0, func(string) {})
-		p.trim = trim
+		p := newPacerWith(w, 0, func(string) {}, trim, nil)
 		var ts int64
 		for ; ts < 2*90000; ts += 1800 {
 			p.push([]byte{1}, ts)
@@ -147,8 +147,7 @@ func (w *dataWriter) Write(b []byte) (int, error) {
 // A connect backlog is dropped up to its newest keyframe, which starts with PAT/PMT.
 func TestPacerLiveStart(t *testing.T) {
 	w := &dataWriter{}
-	p := newPacer(w, 0, func(string) {})
-	p.trim = true
+	p := newPacerWith(w, 0, func(string) {}, true, nil)
 	var ts int64
 	for ; ts < 4*90000; ts += 1800 { // 4s burst, keyframe every 1s
 		key, psi := -1, []byte(nil)
@@ -175,8 +174,7 @@ func TestPacerLiveStart(t *testing.T) {
 // A burst arriving mid-stream (reconnect) is skipped to its newest keyframe.
 func TestPacerJump(t *testing.T) {
 	w := &dataWriter{}
-	p := newPacer(w, 0, func(string) {})
-	p.trim = true
+	p := newPacerWith(w, 0, func(string) {}, true, nil)
 	start := time.Now()
 	var ts int64
 	push := func(n int64) {
@@ -203,4 +201,84 @@ func TestPacerJump(t *testing.T) {
 	if held > 1000 {
 		t.Fatalf("held %dms after mid-stream burst", held)
 	}
+}
+
+// A kept-open source serves a second ffmpeg at once from its cached GOP,
+// without reconnecting to the provider.
+func TestSplicerKeep(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg not installed")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.ts")
+	if out, err := exec.Command("ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25", "-t", "20",
+		"-c:v", "libx264", "-preset", "ultrafast", "-g", "25", "-b:v", "500k", "-f", "mpegts", src).CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
+	data, _ := os.ReadFile(src)
+	var conns atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conns.Add(1)
+		step := len(data) / 200 / 188 * 188 // 20s in 100ms steps
+		for o := 0; o+step <= len(data) && r.Context().Err() == nil; o += step {
+			w.Write(data[o : o+step])
+			w.(http.Flusher).Flush()
+			time.Sleep(100 * time.Millisecond)
+		}
+	}))
+	defer srv.Close()
+	var logs []string
+	var lmu sync.Mutex
+	sp := newSplicer(srv.URL+"/live.ts", "", "", "", "", 5*time.Second, func(s string) { lmu.Lock(); logs = append(logs, s); lmu.Unlock() })
+	sp.trim = true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sp.serve(ctx)
+	run := func(d time.Duration) (*dataWriter, time.Duration) {
+		w := &syncWriter{}
+		c, cc := context.WithTimeout(ctx, d)
+		defer cc()
+		start := time.Now()
+		go sp.attach(c, w)
+		for w.n() == 0 && time.Since(start) < d {
+			time.Sleep(10 * time.Millisecond)
+		}
+		first := time.Since(start)
+		<-c.Done()
+		time.Sleep(50 * time.Millisecond)
+		return w.get(), first
+	}
+	run(3 * time.Second)
+	w2, first := run(2 * time.Second)
+	if conns.Load() != 1 {
+		t.Fatalf("source reconnected: %d connections", conns.Load())
+	}
+	if first > 300*time.Millisecond {
+		t.Fatalf("second ffmpeg waited %v for data", first)
+	}
+	if b := w2.b[0]; len(b) < 188 || b[0] != 0x47 || int(b[1]&0x1f)<<8|int(b[2]) != 0 {
+		t.Fatalf("second ffmpeg did not start on PAT")
+	}
+	lmu.Lock()
+	defer lmu.Unlock()
+	if !strings.Contains(strings.Join(logs, "\n"), "open source connection") {
+		t.Fatalf("logs %v", logs)
+	}
+}
+
+type syncWriter struct {
+	mu sync.Mutex
+	w  dataWriter
+}
+
+func (s *syncWriter) Write(b []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(b)
+}
+func (s *syncWriter) n() int { s.mu.Lock(); defer s.mu.Unlock(); return len(s.w.b) }
+func (s *syncWriter) get() *dataWriter {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return &dataWriter{b: s.w.b}
 }

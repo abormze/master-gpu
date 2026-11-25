@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -52,6 +53,13 @@ type splicer struct {
 	// latest PAT/PMT and the offset in the pending output of the last video keyframe
 	pat, pmt []byte
 	keyAt    int
+
+	// persistent (low latency) mode: the source connection outlives ffmpeg
+	// restarts; each new ffmpeg attaches and starts on the cached GOP
+	mu   sync.Mutex
+	gop  []paceChunk
+	gopB int
+	dead chan struct{}
 }
 
 var errWrite = errors.New("ffmpeg closed input")
@@ -78,18 +86,85 @@ func newSplicer(in, ua, ref, hdr, proxy string, idle time.Duration, log func(str
 		}
 	}
 	return &splicer{url: in, ua: ua, ref: ref, hdr: hdr, idle: idle, log: log, hc: &http.Client{Transport: tr},
-		pmtPID: -1, vidPID: -1, last: map[int]int64{}, open: map[int]bool{}, keep: map[int]bool{},
+		dead: make(chan struct{}), pmtPID: -1, vidPID: -1, last: map[int]int64{}, open: map[int]bool{}, keep: map[int]bool{},
 		overlap: map[int]bool{}, hold: map[int][]byte{}, holdTS: map[int]int64{}, winTS: -1, keyAt: -1, pace: 700 * time.Millisecond}
 }
 
 func (s *splicer) run(ctx context.Context, w io.Writer) {
 	if s.pace > 0 {
-		p := newPacer(w, s.pace, s.log)
-		p.trim = s.trim
+		p := newPacerWith(w, s.pace, s.log, s.trim, nil)
 		s.pc.Store(p)
 		defer p.close()
 		w = p
 	}
+	s.loop(ctx, w)
+}
+
+// serve keeps the source connection open until ctx ends, feeding whichever
+// ffmpeg is attached (attach) and dropping data while none is.
+func (s *splicer) serve(ctx context.Context) {
+	defer close(s.dead)
+	s.loop(ctx, feedW{s})
+}
+
+type feedW struct{ s *splicer }
+
+func (feedW) Write(b []byte) (int, error) { return len(b), nil }
+
+func (s *splicer) alive() bool {
+	select {
+	case <-s.dead:
+		return false
+	default:
+		return true
+	}
+}
+
+func (s *splicer) feed(b []byte, ts int64, key int, psi []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if key >= 0 && psi != nil {
+		s.gop, s.gopB = s.gop[:0], 0
+	}
+	if len(s.gop) > 0 || key >= 0 && psi != nil {
+		if s.gopB += len(b); s.gopB > 32<<20 {
+			s.gop, s.gopB = nil, 0
+		} else {
+			s.gop = append(s.gop, paceChunk{b: append([]byte(nil), b...), ts: ts, key: key, psi: psi})
+		}
+	}
+	if p := s.pc.Load(); p != nil {
+		if p.pushKey(b, ts, key, psi) != nil {
+			s.pc.CompareAndSwap(p, nil)
+		}
+	}
+}
+
+// attach feeds w until ffmpeg stops reading, ctx ends or the source dies.
+// A reattach starts on the newest cached keyframe at the live edge.
+func (s *splicer) attach(ctx context.Context, w io.Writer) {
+	s.mu.Lock()
+	var pre []paceChunk
+	if len(s.gop) > 0 {
+		pre = make([]paceChunk, len(s.gop))
+		copy(pre, s.gop)
+		c := pre[0]
+		c.b = append(append([]byte(nil), c.psi...), c.b[c.key:]...)
+		pre[0] = c
+	}
+	p := newPacerWith(w, s.pace, s.log, s.trim, pre)
+	s.pc.Store(p)
+	s.mu.Unlock()
+	select {
+	case <-p.done:
+	case <-ctx.Done():
+	case <-s.dead:
+	}
+	s.pc.CompareAndSwap(p, nil)
+	p.close()
+}
+
+func (s *splicer) loop(ctx context.Context, w io.Writer) {
 	fails := 0
 	for ctx.Err() == nil {
 		got, err := s.once(ctx, w)
@@ -162,7 +237,17 @@ func (s *splicer) once(ctx context.Context, w io.Writer) (bool, error) {
 		}
 		t0 := time.Now()
 		var err error
-		if p, ok := w.(*pacer); ok {
+		if _, ok := w.(feedW); ok {
+			ts := int64(-1)
+			if s.haveTS {
+				ts = s.vTS
+			}
+			var psi []byte
+			if s.keyAt >= 0 && s.pat != nil && s.pmt != nil {
+				psi = append(append([]byte(nil), s.pat...), s.pmt...)
+			}
+			s.feed(out, ts, s.keyAt, psi)
+		} else if p, ok := w.(*pacer); ok {
 			ts := int64(-1)
 			if s.haveTS {
 				ts = s.vTS
@@ -360,13 +445,25 @@ type pacer struct {
 	stop chan struct{}
 	err  error
 	trim bool
+	pre  []paceChunk
 	last atomic.Int64 // newest video DTS pushed, -1 none
 	held atomic.Int64 // ms of media queued behind the chunk being written
 }
 
 func newPacer(w io.Writer, lead time.Duration, log func(string)) *pacer {
-	p := &pacer{w: w, lead: lead, log: log, ch: make(chan paceChunk, 8192), done: make(chan struct{}), stop: make(chan struct{})}
+	return newPacerWith(w, lead, log, false, nil)
+}
+
+// pre: cached GOP of a kept-open source, released at once at the live edge
+func newPacerWith(w io.Writer, lead time.Duration, log func(string), trim bool, pre []paceChunk) *pacer {
+	p := &pacer{w: w, lead: lead, log: log, ch: make(chan paceChunk, 8192), done: make(chan struct{}), stop: make(chan struct{}), trim: trim, pre: pre}
 	p.last.Store(-1)
+	for i := len(pre) - 1; i >= 0; i-- {
+		if pre[i].ts >= 0 {
+			p.last.Store(pre[i].ts)
+			break
+		}
+	}
 	go p.loop()
 	return p
 }
@@ -407,7 +504,23 @@ func (p *pacer) loop() {
 	const win, keep, step = 5 * time.Second, 300 * time.Millisecond, 500 * time.Millisecond
 	minHeld, winAt := time.Duration(1<<62), time.Now()
 	var pend []paceChunk
-	if p.trim {
+	if len(p.pre) > 0 {
+		pend, p.pre = p.pre, nil
+		for i := range pend {
+			pend[i].fast = true
+		}
+		for _, x := range pend {
+			if x.ts >= 0 {
+				ts0 = x.ts
+				break
+			}
+		}
+		t0 = time.Now()
+		if l := p.last.Load(); ts0 >= 0 && l >= 0 {
+			t0 = t0.Add(-time.Duration((l-ts0)&mask) * time.Second / 90000)
+		}
+		p.log("input: restarted on the open source connection at the live edge")
+	} else if p.trim {
 		var ok bool
 		if pend, t0, ts0, ok = p.liveStart(); !ok {
 			return

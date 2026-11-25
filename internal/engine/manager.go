@@ -81,6 +81,64 @@ type proc struct {
 	infoIn   []string // ffmpeg's input/output stream dump
 	infoOut  []string
 	dumpOut  bool
+	// low latency: source connection kept open across ffmpeg restarts
+	src       *splicer
+	srcKey    string
+	srcCancel context.CancelFunc
+	srcTimer  *time.Timer
+}
+
+// source returns the kept-open splicer for key, opening a new one if needed.
+func (p *proc) source(key string, mk func() *splicer) *splicer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.srcTimer != nil {
+		p.srcTimer.Stop()
+		p.srcTimer = nil
+	}
+	if p.src != nil && p.srcKey == key && p.src.alive() {
+		return p.src
+	}
+	if p.srcCancel != nil {
+		p.srcCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	p.src, p.srcKey, p.srcCancel = mk(), key, cancel
+	go p.src.serve(ctx)
+	return p.src
+}
+
+func (p *proc) srcNow() *splicer {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.src
+}
+
+// releaseSource closes the kept-open source after linger unless reattached.
+func (p *proc) releaseSource(linger time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.src == nil {
+		return
+	}
+	if p.srcTimer != nil {
+		p.srcTimer.Stop()
+	}
+	src, cancel := p.src, p.srcCancel
+	close := func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if p.src == src {
+			cancel()
+			p.src, p.srcCancel, p.srcTimer = nil, nil, nil
+		}
+	}
+	if linger <= 0 {
+		p.srcTimer = nil
+		go close()
+		return
+	}
+	p.srcTimer = time.AfterFunc(linger, close)
 }
 
 type Hooks struct {
@@ -290,6 +348,7 @@ func (m *Manager) setState(id int64, name string, p *proc, to State, msg string)
 
 func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 	defer close(p.done)
+	defer p.releaseSource(20 * time.Second)
 	fails := 0
 	for {
 		var s models.Stream
@@ -367,10 +426,21 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 			if ua == "" {
 				ua = st.UserAgent
 			}
-			spl = newSplicer(opts.Input, ua, s.Referer, s.Headers, opts.Proxy, time.Duration(st.StreamTimeout)*time.Second/2,
-				func(msg string) { m.st.Log("stream", id, "info", msg) })
-			spl.trim = s.Transcode.LowLatency
+			mk := func() *splicer {
+				sp := newSplicer(opts.Input, ua, s.Referer, s.Headers, opts.Proxy, time.Duration(st.StreamTimeout)*time.Second/2,
+					func(msg string) { m.st.Log("stream", id, "info", msg) })
+				sp.trim = s.Transcode.LowLatency
+				return sp
+			}
+			if s.Transcode.LowLatency {
+				spl = p.source(strings.Join([]string{opts.Input, ua, s.Referer, s.Headers, opts.Proxy}, "\x00"), mk)
+			} else {
+				spl = mk()
+			}
 			opts.Input = "pipe:0"
+		}
+		if spl == nil || !s.Transcode.LowLatency {
+			p.releaseSource(0)
 		}
 		args, variants, err := Build(&s, &st, opts)
 		if err != nil {
@@ -526,7 +596,14 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 	closeW()
 	if ir != nil {
 		ir.Close()
-		go func() { spl.run(ctx, iw); iw.Close() }()
+		go func() {
+			if spl.dead != nil && spl.trim && spl == p.srcNow() {
+				spl.attach(ctx, iw)
+			} else {
+				spl.run(ctx, iw)
+			}
+			iw.Close()
+		}()
 	}
 	go p.hub.Pump(pr)
 	for i, f := range ors {
