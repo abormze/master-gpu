@@ -117,7 +117,7 @@ const XVIDEO2 = p => [
 const XAUDIO = p => [F.rows(p + "audio_encoders", "Audio Encoder|ترميز الصوت", XAENC, { ...PO, xe: "Audio Encoder" }), F.s(p + "audio_channels", "Audio Channels", XO.ach, PO), F.s(p + "audio_rate", "Audio Sample Rate", XO.arate, { ...PO, u: "Hz" }), F.rg(p + "audio_volume", "Audio Volume", { ...PO, min: 0, max: 3, step: 0.05, def: 1 })];
 const XSUB = p => [F.s(p + "sub_mode", "Subtitle Encoder", XO.sub, { ...PO, hint: "Overlay = burn into picture, Copy Restream = WebVTT in HLS|Overlay = حرق على الصورة، Copy Restream = WebVTT بالـ HLS" }),
   F.g("Subtitle Options|خيارات الترجمة", [F.fs(p + "sub_file", "file", { ext: SUBX }), F.t(p + "sub_lang", "lang", { ph: "ar" }), F.n(p + "sub_font_size", "font"), F.t(p + "txt_page", "teletext")], PO)];
-const XMORE = p => [F.t(p + "tune", "Video Tune", { ...PO, ph: "ll / zerolatency" }), F.n(p + "bframes", "B-Frames", PO), F.yn(p + "audio_normalize", "Audio Normalize", PO), F.n(p + "audio_delay", "Audio Delay", { ...PO, u: "ms" }), F.a(p + "extra_args", "Extra ffmpeg args|خيارات ffmpeg إضافية", PO)];
+const XMORE = p => [F.yn(p + "low_latency", "Low Latency|تأخير منخفض", { ...PO, hint: "Smaller input/mux buffers for minimum delay from source|بفر أقل للإدخال والخرج لأقل تأخير عن المصدر" }), F.t(p + "tune", "Video Tune", { ...PO, ph: "ll / zerolatency" }), F.n(p + "bframes", "B-Frames", PO), F.yn(p + "audio_normalize", "Audio Normalize", PO), F.n(p + "audio_delay", "Audio Delay", { ...PO, u: "ms" }), F.a(p + "extra_args", "Extra ffmpeg args|خيارات ffmpeg إضافية", PO)];
 const XN = (o, v) => (o.find(([a]) => String(a) === String(v ?? "")) || [, v || ""])[1].split("|")[0];
 const isCp = x => (x.transcode?.video_encoders || []).every(v => v.codec === "copy");
 const tagc = t => { let h = 0; for (const c of t) h = (h * 31 + c.charCodeAt(0)) % 360; return `<span class="tg" style="background:hsl(${h} 45% 52%)">${esc(t.replace(/\s+/g, " ").trim())}</span>`; };
@@ -645,7 +645,7 @@ function fmtDetails(d) {
   const two = (l, r) => `<div class="x2"><div>${l.map(x => `<div class="xl">${x}</div>`).join("")}</div><div>${r.map(x => `<div class="xl">${x}</div>`).join("")}</div></div>`;
   const url = (lbl, u, extra = "") => `<div class="xu"><span class="el" title="${esc(u)}">${esc(lbl + u)}</span><button class="xcp" data-cp="${esc(u)}" title="Copy">${XI.cp}</button>${extra}</div>`;
   const usage = two(
-    [`CPU Usage: ${pct(d.cpu_percent)}`, `System Memory Usage: ${Math.round((d.mem_rss || 0) / 1048576)} MiB`],
+    [`CPU Usage: ${pct(d.cpu_percent)}`, `System Memory Usage: ${Math.round((d.mem_rss || 0) / 1048576)} MiB`, ...(d.input_buf ? [`Input Buffer: ${d.input_buf} ms`] : [])],
     "gpu_enc" in d ? [`GPU${d.gpu} Usage: DEC ${pct(d.gpu_dec)} SM ${pct(d.gpu_sm)} ENC ${pct(d.gpu_enc)}`, `Graphics Memory Usage: ${Math.round(d.gpu_mem || 0)} MiB`] : []);
   const urls = two(
     (d.input_urls || []).map((u, i) => url(`Input #${i}: `, u, i === d.input_index && d.state === "running" ? `<span class="ok">✔</span>` : "")),

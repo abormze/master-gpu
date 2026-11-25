@@ -61,6 +61,7 @@ type Status struct {
 	Black     bool      `json:"black"`
 	Silent    bool      `json:"silent"`
 	Quality   float64   `json:"quality"`
+	InputBuf  int64     `json:"input_buf"` // ms held by the input pacer
 }
 
 type proc struct {
@@ -368,6 +369,7 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 			}
 			spl = newSplicer(opts.Input, ua, s.Referer, s.Headers, opts.Proxy, time.Duration(st.StreamTimeout)*time.Second/2,
 				func(msg string) { m.st.Log("stream", id, "info", msg) })
+			spl.trim = s.Transcode.LowLatency
 			opts.Input = "pipe:0"
 		}
 		args, variants, err := Build(&s, &st, opts)
@@ -641,6 +643,9 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 					p.st.Speed, _ = strconv.ParseFloat(strings.TrimSuffix(v, "x"), 64)
 				}
 			case "progress":
+				if spl != nil {
+					p.st.InputBuf = spl.buffered()
+				}
 				if ot >= 0 {
 					now := time.Now()
 					win = append(win, sample{now, ot, p.st.Frames})
@@ -855,6 +860,7 @@ func MergeProfile(p, s models.Transcode) models.Transcode {
 	r.Text, r.TextX, r.TextY, r.TextSize, r.TextColor, r.TextAlpha, r.TextScroll = p.Text, p.TextX, p.TextY, p.TextSize, p.TextColor, p.TextAlpha, p.TextScroll
 	r.AudioEncoders, r.AudioChannels, r.AudioRate, r.AudioVolume = p.AudioEncoders, p.AudioChannels, p.AudioRate, p.AudioVolume
 	r.AudioNormalize, r.AudioDelay = p.AudioNormalize, p.AudioDelay
+	r.LowLatency = p.LowLatency || s.LowLatency
 	r.SubMode = p.SubMode
 	if p.SubFile != "" {
 		r.SubFile = p.SubFile

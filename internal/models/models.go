@@ -132,6 +132,7 @@ type Transcode struct {
 	FrameRate      string     `json:"frame_rate"`
 	GOP            int        `json:"gop"`
 	BFrames        int        `json:"bframes"`
+	LowLatency     bool       `json:"low_latency"`
 	Deinterlace    bool       `json:"deinterlace"`
 	PixFmt         string     `json:"pix_fmt"`
 	DAR            string     `json:"dar"`

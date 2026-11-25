@@ -103,11 +103,15 @@ func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
 	if s.RateEmu || scheme == "" || scheme == "file" {
 		a = append(a, "-re")
 	}
+	ff := "+genpts+discardcorrupt"
 	if len(s.FFlags) > 0 {
-		a = append(a, "-fflags", "+"+strings.Join(s.FFlags, "+"))
-	} else {
-		a = append(a, "-fflags", "+genpts+discardcorrupt")
+		ff = "+" + strings.Join(s.FFlags, "+")
 	}
+	if s.Transcode.LowLatency {
+		ff += "+nobuffer"
+		a = append(a, "-flags", "low_delay")
+	}
+	a = append(a, "-fflags", ff)
 	if s.ProbeSize > 0 {
 		a = append(a, "-probesize", strconv.Itoa(s.ProbeSize))
 	}
@@ -451,6 +455,9 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		}
 		if vnv {
 			a = append(a, "-bf:v:"+vi, strconv.Itoa(t.BFrames), "-forced-idr:v:"+vi, "1")
+			if t.LowLatency {
+				a = append(a, "-zerolatency:v:"+vi, "1")
+			}
 		}
 		if v.FPS != "" && v.Codec != "copy" {
 			a = append(a, "-r:v:"+vi, v.FPS)
@@ -556,13 +563,18 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	// re-send encoder SPS/PPS on keyframes so TS viewers can join mid-stream;
 	// copied streams get them from mp4toannexb. tee re-indexes streams per slave,
 	// so match by type: an index could hit the audio stream and corrupt AAC.
+	// mpegts holds packets max_delay (0.7s default) ahead of PCR; players buffer that much
+	mx := ""
+	if s.Transcode.LowLatency {
+		mx = ":max_delay=200000"
+	}
 	dx := func(vs []int) string {
 		for _, v := range vs {
 			if v < len(venc) && !copyMode && venc[v].Codec != "copy" {
-				return ":bsfs/v=dump_extra"
+				return ":bsfs/v=dump_extra" + mx
 			}
 		}
-		return ""
+		return mx
 	}
 	for oi, out := range s.Outputs {
 		if out.Disabled {

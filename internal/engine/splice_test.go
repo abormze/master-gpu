@@ -112,3 +112,27 @@ func TestPacer(t *testing.T) {
 		t.Fatalf("waited %v on a timestamp jump", w.at[11]-w.at[10])
 	}
 }
+
+func TestPacerTrim(t *testing.T) {
+	// a 2s backlog queued up front (provider connect burst), then real-time arrival
+	for _, trim := range []bool{false, true} {
+		w := &tsWriter{t0: time.Now()}
+		p := newPacer(w, 0, func(string) {})
+		p.trim = trim
+		var ts int64
+		for ; ts < 2*90000; ts += 1800 {
+			p.push([]byte{1}, ts)
+		}
+		start := time.Now()
+		for ts0 := ts; time.Since(start) < 17*time.Second; ts += 1800 {
+			time.Sleep(time.Until(start.Add(time.Duration(ts-ts0) * time.Second / 90000)))
+			p.push([]byte{1}, ts)
+		}
+		held := p.held.Load()
+		p.close()
+		if trim && held > 1500 || !trim && held < 1800 {
+			t.Fatalf("trim=%v held %dms", trim, held)
+		}
+		t.Logf("trim=%v held %dms", trim, held)
+	}
+}

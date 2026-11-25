@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,6 +46,9 @@ type splicer struct {
 	// Providers deliver in bursts, which made ffmpeg decode and NVENC encode
 	// in bursts: ENC jumping 0%..100% and speed swinging around 1x.
 	pace time.Duration
+	// trim lets the pacer catch up when it holds more than it needs (low latency)
+	trim bool
+	pc   atomic.Pointer[pacer]
 }
 
 var errWrite = errors.New("ffmpeg closed input")
@@ -78,6 +82,8 @@ func newSplicer(in, ua, ref, hdr, proxy string, idle time.Duration, log func(str
 func (s *splicer) run(ctx context.Context, w io.Writer) {
 	if s.pace > 0 {
 		p := newPacer(w, s.pace, s.log)
+		p.trim = s.trim
+		s.pc.Store(p)
 		defer p.close()
 		w = p
 	}
@@ -314,6 +320,14 @@ func tsval(b []byte) int64 {
 	return int64(b[0]>>1&7)<<30 | int64(b[1])<<22 | int64(b[2]>>1)<<15 | int64(b[3])<<7 | int64(b[4]>>1)
 }
 
+// buffered is how much media (ms) the pacer holds back from ffmpeg.
+func (s *splicer) buffered() int64 {
+	if p := s.pc.Load(); p != nil {
+		return p.held.Load()
+	}
+	return 0
+}
+
 type paceChunk struct {
 	b  []byte
 	ts int64 // 90kHz video DTS, -1 = unknown
@@ -329,10 +343,14 @@ type pacer struct {
 	done chan struct{}
 	stop chan struct{}
 	err  error
+	trim bool
+	last atomic.Int64 // newest video DTS pushed, -1 none
+	held atomic.Int64 // ms of media queued behind the chunk being written
 }
 
 func newPacer(w io.Writer, lead time.Duration, log func(string)) *pacer {
 	p := &pacer{w: w, lead: lead, log: log, ch: make(chan paceChunk, 8192), done: make(chan struct{}), stop: make(chan struct{})}
+	p.last.Store(-1)
 	go p.loop()
 	return p
 }
@@ -344,6 +362,9 @@ func (p *pacer) push(b []byte, ts int64) error {
 	case <-p.done:
 		return errWrite
 	default:
+	}
+	if ts >= 0 {
+		p.last.Store(ts)
 	}
 	select {
 	case p.ch <- paceChunk{append([]byte(nil), b...), ts}:
@@ -363,6 +384,10 @@ func (p *pacer) loop() {
 	const mask = 1<<33 - 1
 	var t0 time.Time
 	var ts0 int64 = -1
+	// trim: keep the smallest backlog seen per window near keep; drop the rest
+	// by releasing up to 5% faster than real time, which ffmpeg absorbs evenly
+	const win, keep, step = 5 * time.Second, 300 * time.Millisecond, 250 * time.Millisecond
+	minHeld, winAt := time.Duration(1<<62), time.Now()
 	for {
 		var c paceChunk
 		select {
@@ -374,6 +399,19 @@ func (p *pacer) loop() {
 			now := time.Now()
 			if ts0 < 0 {
 				t0, ts0 = now, c.ts
+			}
+			if l := p.last.Load(); l >= 0 {
+				if q := (l - c.ts) & mask; q < mask/2 {
+					h := time.Duration(q) * time.Second / 90000
+					p.held.Store(h.Milliseconds())
+					minHeld = min(minHeld, h)
+				}
+			}
+			if now.Sub(winAt) >= win {
+				if p.trim && minHeld > keep && minHeld < 1<<62 {
+					t0 = t0.Add(-min(minHeld-keep, step))
+				}
+				minHeld, winAt = 1<<62, now
 			}
 			d := (c.ts - ts0) & mask
 			media := time.Duration(d) * time.Second / 90000
