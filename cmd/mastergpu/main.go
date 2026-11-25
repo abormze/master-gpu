@@ -46,6 +46,17 @@ func main() {
 		return
 	}
 	os.MkdirAll(*dir, 0o755)
+	// systemd gives the service no HOME, so CUDA could not keep its JIT cache and
+	// every ffmpeg start spent ~30s recompiling the scale_cuda kernels
+	if os.Getenv("HOME") == "" {
+		os.Setenv("HOME", *dir)
+	}
+	if os.Getenv("CUDA_CACHE_PATH") == "" {
+		os.Setenv("CUDA_CACHE_PATH", filepath.Join(*dir, "cuda-cache"))
+	}
+	if os.Getenv("CUDA_CACHE_MAXSIZE") == "" {
+		os.Setenv("CUDA_CACHE_MAXSIZE", "1073741824")
+	}
 	if stage := filepath.Join(*dir, "restore.db"); fileExists(stage) {
 		db := filepath.Join(*dir, "panel.db")
 		os.Rename(db, db+".before-restore")

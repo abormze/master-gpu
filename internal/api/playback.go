@@ -808,8 +808,17 @@ func (s *Server) exportM3U(w http.ResponseWriter, r *http.Request, _ *models.Acc
 	}
 	base, secure := s.baseURL(r), s.settings().SecurePlayback
 	var b strings.Builder
+	only := map[int64]bool{}
+	for _, v := range strings.Split(r.URL.Query().Get("ids"), ",") {
+		if id, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil {
+			only[id] = true
+		}
+	}
 	b.WriteString("#EXTM3U\n")
 	for _, x := range store.List[models.Stream](s.St, models.KStream) {
+		if len(only) > 0 && !only[x.ID] {
+			continue
+		}
 		q := ""
 		if secure {
 			q = "?t=" + s.signToken(x.ID, 365*24*time.Hour)

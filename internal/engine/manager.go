@@ -429,17 +429,13 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 			mk := func() *splicer {
 				sp := newSplicer(opts.Input, ua, s.Referer, s.Headers, opts.Proxy, time.Duration(st.StreamTimeout)*time.Second/2,
 					func(msg string) { m.st.Log("stream", id, "info", msg) })
-				sp.trim = s.Transcode.LowLatency
+				sp.trim = true
 				return sp
 			}
-			if s.Transcode.LowLatency {
-				spl = p.source(strings.Join([]string{opts.Input, ua, s.Referer, s.Headers, opts.Proxy}, "\x00"), mk)
-			} else {
-				spl = mk()
-			}
+			spl = p.source(strings.Join([]string{opts.Input, ua, s.Referer, s.Headers, opts.Proxy}, "\x00"), mk)
 			opts.Input = "pipe:0"
 		}
-		if spl == nil || !s.Transcode.LowLatency {
+		if spl == nil {
 			p.releaseSource(0)
 		}
 		args, variants, err := Build(&s, &st, opts)

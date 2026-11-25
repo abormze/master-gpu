@@ -575,7 +575,7 @@ VIEWS.server = async (el = $("#page")) => {
 };
 VIEWS.dash = el => {
   const tile = (i, id, l) => `<div class="card tile"><div class="ic">${ico(i)}</div><div><div class="v" id="${id}">—</div><div class="l">${L(l)}</div></div></div>`;
-  el.innerHTML = `<div class="grid g4">${tile("stream", "t_run", "Running streams|قنوات شغالة")}${tile("eyes", "t_view", "Viewers|المشاهدين")}${tile("cpu", "t_cpu", "CPU")}${tile("ram", "t_ram", "RAM")}${tile("net", "t_net", "Network out|الخروج")}${tile("gpu", "t_gpu", "GPUs|الكروت")}</div>
+  el.innerHTML = `<div class="grid g4">${tile("stream", "t_run", "Running streams|قنوات شغالة")}${tile("eyes", "t_view", "Viewers|المشاهدين")}${tile("cpu", "t_cpu", "CPU")}${tile("ram", "t_ram", "RAM")}${tile("net", "t_netin", "Network in|الدخول")}${tile("net", "t_net", "Network out|الخروج")}${tile("gpu", "t_gpu", "GPUs|الكروت")}</div>
   <div class="grid g2" style="margin-top:16px"><div class="card"><div class="hd">${ico("cpu")} ${L("System|النظام")}<span class="sp"></span><span class="mut" id="host"></span></div><div class="bd"><canvas class="spark" id="cpuC"></canvas><div id="sysm"></div></div></div>
   <div class="card"><div class="hd">${ico("net")} ${L("Network|الشبكة")}<span class="sp"></span><span class="chip ok">IN</span><span class="chip pri">OUT</span></div><div class="bd"><canvas class="spark" id="netC"></canvas><div class="kv" id="sysk" style="margin-top:12px"></div></div></div></div>
   <div class="grid g2" id="gpus" style="margin-top:16px"></div>
@@ -583,7 +583,7 @@ VIEWS.dash = el => {
   S.onLive = () => {
     const d = S.dash; if (!d || !$("#t_run")) return; const sy = d.sys, st = d.streams || {};
     $("#t_run").textContent = `${st.running || 0} / ${st.total || 0}`; $("#t_view").textContent = d.viewers; $("#t_cpu").textContent = sy.cpu.toFixed(1) + "%";
-    $("#t_ram").textContent = pct(sy.mem_used, sy.mem_total).toFixed(0) + "%"; $("#t_net").textContent = fmtBits(sy.net_tx); $("#t_gpu").textContent = (d.gpu.cards || []).length;
+    $("#t_ram").textContent = pct(sy.mem_used, sy.mem_total).toFixed(0) + "%"; $("#t_netin").textContent = fmtBits(sy.net_rx); $("#t_net").textContent = fmtBits(sy.net_tx); $("#t_gpu").textContent = (d.gpu.cards || []).length;
     $("#host").textContent = `${sy.hostname} · ${sy.os}`;
     $("#sysm").innerHTML = meter("CPU", sy.cpu, 100, `${sy.cpu.toFixed(1)}% · ${sy.cores} cores · load ${sy.load1}`) + meter("RAM", sy.mem_used, sy.mem_total, `${fmtB(sy.mem_used)} / ${fmtB(sy.mem_total)}`) + meter(L("Disk|القرص"), sy.disk_used, sy.disk_total, `${fmtB(sy.disk_used)} / ${fmtB(sy.disk_total)}`) + meter("RAM disk (HLS)", sy.shm_used, sy.shm_total, `${fmtB(sy.shm_used)} / ${fmtB(sy.shm_total)}`);
     $("#sysk").innerHTML = `<b>IN</b><span>${fmtBits(sy.net_rx)}</span><b>OUT</b><span>${fmtBits(sy.net_tx)}</span><b>${L("Uptime|مدة التشغيل")}</b><span>${fmtDur(sy.uptime)}</span><b>${L("Panel|اللوحة")}</b><span>${fmtB(sy.panel_rss)} · ${sy.panel_cpu.toFixed(1)}% CPU · ${L("up|يعمل")} ${fmtDur(d.uptime)}</span><b>NVIDIA</b><span>${d.gpu.available ? `driver ${esc(d.gpu.driver)} · CUDA ${esc(d.gpu.cuda)}${d.gpu.patched ? " · patched" : ""}` : `<span class="chip warn">${esc(d.gpu.error || "not detected")}</span>`}</span><b>FFmpeg</b><span>v${d.ffmpeg}</span>`;
@@ -662,8 +662,8 @@ VIEWS.streams = async el => {
   const cats = S.cache.category.filter(c => c.type !== "movie" && c.type !== "series");
   el.innerHTML = `<div class="tbar"><input class="in search" id="q" placeholder="${L("Search…|بحث…")}"><select class="in" id="fc" style="width:auto"><option value="">${L("All categories|كل التصنيفات")}</option>${cats.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>
    <select class="in" id="fs" style="width:auto"><option value="">${L("All states|كل الحالات")}</option>${["running", "error", "stopped", "starting", "waiting"].map(s => `<option>${s}</option>`).join("")}</select><span class="sp"></span>
-   <span id="selb" style="display:none" class="acts"><button class="btn s" data-b="start">${ico("play")}</button><button class="btn s" data-b="stop">${ico("stop")}</button><button class="btn s" data-b="restart">${ico("re")}</button><button class="btn s d" data-b="delete">${ico("del")}</button></span>
-   <button class="btn" id="imp">${ico("down")} M3U</button><a class="btn" href="/api/export/m3u" download="mastergpu.m3u">${ico("up")} M3U</a><button class="btn p" id="add">${ico("plus")} ${L("Add stream|إضافة قناة")}</button></div>
+   <span id="selb" class="acts xbulk"><label class="xsel"><input type="checkbox" id="all2"><span id="selc">${L("Select all|تحديد الكل")}</span></label><button class="btn xg st" data-b="start">${L("Start Streams|تشغيل القنوات")}</button><button class="btn xg sp" data-b="stop">${L("Stop Streams|إيقاف القنوات")}</button><button class="btn xg rs" data-b="restart">${L("Restart Streams|إعادة تشغيل القنوات")}</button><button class="btn xg ex" data-b="export">${L("Export Playlist|تصدير القائمة")}</button><button class="btn s d" data-b="delete" id="seldel" style="display:none" title="${L("Delete selected|حذف المحدد")}">${ico("del")}</button></span>
+   <button class="btn" id="imp">${ico("down")} M3U</button><button class="btn p" id="add">${ico("plus")} ${L("Add stream|إضافة قناة")}</button></div>
    <div class="card tw"><table class="xs"><thead><tr><th><input type="checkbox" id="all"></th><th>ID</th><th>NAME</th><th>SERVER</th><th>HWACCEL</th><th>BITRATE</th><th>QUALITY</th><th>FPS</th><th>TIME</th><th>SPEED</th><th>CONNECTIONS</th><th>SETTINGS</th></tr></thead><tbody id="tb"></tbody></table></div>`;
   const sel = new Set(), open = new Map(), det = {};
   const poll = async id => {
@@ -683,17 +683,31 @@ VIEWS.streams = async el => {
      <td><span class="xb sv">${esc(r.server_name || "Master")}</span></td>
      <td>${hwTags(r)}</td><td>${on && r.bitrate ? r.bitrate.toFixed(1) + "kbits/s" : ""}</td><td>${on ? (r.quality || -1).toFixed(1) : ""}</td><td>${on ? r.fps.toFixed(0) : ""}</td><td>${on ? hms(r.uptime) : ""}</td><td>${on ? +r.speed.toFixed(2) + "x" : ""}</td><td>${r.viewers || 0}</td>
      <td><div class="xa">${busy ? `<button class="xi red" data-a="stop" data-id="${r.id}" title="Stop">${XI.stop}</button><button class="xi" data-a="restart" data-id="${r.id}" title="Restart">${XI.play}</button>` : `<button class="xi" data-a="start" data-id="${r.id}" title="Start">${XI.play}</button>`}<button class="xi" data-a="edit" data-id="${r.id}" title="Settings">${XI.gear}</button><button class="xi" data-a="play" data-id="${r.id}" title="Preview">${XI.tree}</button><button class="xi" data-a="log" data-id="${r.id}" title="Log">${XI.file}</button><button class="xi" data-a="clone" data-id="${r.id}" title="Clone">${XI.clone}</button><button class="xi ll${r.low_latency ? " on" : ""}" data-a="ll" data-id="${r.id}" title="${L(r.low_latency ? "Low Latency: ON|تأخير منخفض: شغّال" : "Low Latency: OFF|تأخير منخفض: مطفي")}">${XI.bolt}</button><button class="xi red" data-a="del" data-id="${r.id}" title="Delete">${XI.x}</button></div></td></tr>${open.has(r.id) ? `<tr class="xc" data-child="${r.id}"><td colspan="12"><div class="xd" id="xd${r.id}">${det[r.id] || "…"}</div></td></tr>` : ""}`; }).join("") || `<tr><td colspan="99" class="empty">${L("No streams yet — add one or import an M3U|لا توجد قنوات — أضف قناة أو استورد M3U")}</td></tr>`;
-    $("#selb").style.display = sel.size ? "flex" : "none";
+    selUI();
   };
+  const selUI = () => {
+    const vis = $$("[data-s]"), n = sel.size, all = vis.length > 0 && vis.every(c => c.checked);
+    $("#selc").textContent = n ? L(`${n} selected|${n} محددة`) : L("Select all|تحديد الكل");
+    $("#all2").checked = $("#all").checked = all; $("#all2").indeterminate = $("#all").indeterminate = n > 0 && !all;
+    $("#seldel").style.display = n ? "" : "none";
+  };
+  const selAll = on => { $$("[data-s]").forEach(c => { c.checked = on; on ? sel.add(+c.dataset.s) : sel.delete(+c.dataset.s); }); draw(); };
   const refresh = async () => { S.rows = await api("status"); draw(); };
   S.onLive = draw; await refresh();
   ["q", "fc", "fs"].forEach(i => $("#" + i).oninput = draw);
   $("#add").onclick = () => editModal("stream", null, refresh);
   $("#imp").onclick = () => importModal(refresh);
-  $("#all").onchange = e => { $$("[data-s]").forEach(c => { c.checked = e.target.checked; c.checked ? sel.add(+c.dataset.s) : sel.delete(+c.dataset.s); }); draw(); };
-  $("#selb").onclick = async e => { const b = e.target.closest("[data-b]"); if (!b) return; if (b.dataset.b === "delete" && !confirm(L("Delete selected streams?|حذف القنوات المحددة؟"))) return; await tryDo(() => api("streams/bulk", { method: "POST", body: { ids: [...sel], action: b.dataset.b } }), "OK"); sel.clear(); refresh(); };
+  $("#all").onchange = $("#all2").onchange = e => selAll(e.target.checked);
+  $("#selb").onclick = async e => {
+    const b = e.target.closest("[data-b]"); if (!b) return; const a = b.dataset.b;
+    if (a === "export") { const x = document.createElement("a"); x.href = "/api/export/m3u" + (sel.size ? "?ids=" + [...sel].join(",") : ""); x.download = "mastergpu.m3u"; document.body.appendChild(x); x.click(); x.remove(); return; }
+    let ids = [...sel];
+    if (!ids.length) { ids = $$("[data-s]").map(c => +c.dataset.s); if (!ids.length || !confirm(L(`No streams selected. Apply "${b.textContent}" to all ${ids.length} streams shown?|ما في قنوات محددة. تطبيق "${b.textContent}" على كل القنوات الظاهرة (${ids.length})؟`))) return; }
+    else if (a === "delete" ? !confirm(L("Delete selected streams?|حذف القنوات المحددة؟")) : a !== "start" && !confirm(L(`${b.textContent}: ${ids.length} streams?|${b.textContent}: ${ids.length} قناة؟`))) return;
+    await tryDo(() => api("streams/bulk", { method: "POST", body: { ids, action: a } }), "OK"); sel.clear(); refresh();
+  };
   $("#tb").onclick = async e => {
-    const c = e.target.closest("[data-s]"); if (c) { c.checked ? sel.add(+c.dataset.s) : sel.delete(+c.dataset.s); $("#selb").style.display = sel.size ? "flex" : "none"; return; }
+    const c = e.target.closest("[data-s]"); if (c) { c.checked ? sel.add(+c.dataset.s) : sel.delete(+c.dataset.s); selUI(); return; }
     const cp = e.target.closest("[data-cp]"); if (cp) { copyText(cp.dataset.cp); return; }
     const b = e.target.closest("[data-a]");
     if (!b) { const tr = e.target.closest("tr[data-row]"); if (tr && !e.target.closest("a,button,input")) toggle(+tr.dataset.row); return; }

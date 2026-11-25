@@ -239,3 +239,7 @@ table.xs th,table.xs td{padding:9px 8px}
 .hq:hover::after{content:attr(data-tip);position:absolute;left:28px;top:-8px;width:min(460px,60vw);background:#1d1d1f;color:#fff;padding:10px 14px;border-radius:5px;font-size:13px;font-weight:500;line-height:1.55;text-align:center;white-space:normal;z-index:60;box-shadow:0 4px 14px rgba(0,0,0,.25);pointer-events:none}
 [dir=rtl] .hq:hover::after{left:auto;right:28px}
 .xi.ll{color:#a7aebb}.xi.ll.on{color:#f59e0b}
+.xbulk{display:flex;align-items:center;gap:0;flex-wrap:wrap}.xbulk .xsel{display:inline-flex;align-items:center;gap:6px;padding:0 12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.xbulk .btn.xg{border:0;border-radius:0;color:#fff;padding:9px 16px}.xbulk .btn.xg:first-of-type{border-radius:8px 0 0 8px}.xbulk .btn.xg.ex{border-radius:0 8px 8px 0;margin-inline-end:8px}
+.btn.xg.st{background:#1e6bd6}.btn.xg.sp{background:#d62828}.btn.xg.rs{background:#f5b301}.btn.xg.ex{background:#3fa9f5}.btn.xg:hover{filter:brightness(1.1)}
+[dir=rtl] .xbulk .btn.xg:first-of-type{border-radius:0 8px 8px 0}[dir=rtl] .xbulk .btn.xg.ex{border-radius:8px 0 0 8px}
