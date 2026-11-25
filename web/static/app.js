@@ -66,7 +66,7 @@ const F = {
   d: (k, l, x = {}) => ({ k, l, ty: "date", ...x }), ints: (k, l, x = {}) => ({ k, l, ty: "ints", ...x }), kvs: (k, l, x = {}) => ({ k, l, ty: "kv", ...x }),
   rows: (k, l, f, x = {}) => ({ k, l, ty: "rows", f, ...x }), h: l => ({ ty: "head", l }),
   yn: (k, l, x = {}) => ({ k, l, ty: "yn", ...x }), g: (l, f, x = {}) => ({ k: "", l, ty: "grp", f, ...x }), fs: (k, l, x = {}) => ({ k, l, ty: "fsel", ...x }),
-  urls: (k, l, x = {}) => ({ k, l, ty: "urls", ...x }), rg: (k, l, x = {}) => ({ k, l, ty: "range", ...x }), ms: (k, l, o, x = {}) => ({ k, l, ty: "ms", o, ...x }), note: (id, l) => ({ k: "", ty: "note", id, l })
+  urls: (k, l, x = {}) => ({ k, l, ty: "urls", ...x }), es: (k, l, src, x = {}) => ({ k, l, ty: "es", src, ...x }), outs: (k, l, x = {}) => ({ k, l, ty: "outs", ...x }), rg: (k, l, x = {}) => ({ k, l, ty: "range", ...x }), ms: (k, l, o, x = {}) => ({ k, l, ty: "ms", o, ...x }), note: (id, l) => ({ k: "", ty: "note", id, l })
 };
 const VENC = [F.s("codec", "Codec|الترميز", opts("copy", "h264", "hevc", "av1", "mpeg2")), F.t("size", "Size (WxH)|الدقة", { ph: "1920x1080" }), F.s("rc", "Rate control|التحكم", opts("cbr", "vbr", "cq")), F.n("bitrate", "Bitrate kbps|البت ريت"), F.n("maxrate", "Max kbps|أقصى"), F.n("cq", "CQ"), F.t("name", "Label|الاسم", { ph: "FHD" })];
 const AENC = [F.s("codec", "Codec|الترميز", opts("copy", "aac", "fdk_aac", "mp3", "mp2", "ac3", "opus")), F.n("bitrate", "Bitrate kbps|البت ريت")];
@@ -94,21 +94,26 @@ const XO = {
   out: opts(["hls", "HLS"], ["hls_master", "HLS-Master"], ["http", "HTTP"], ["rtmp", "RTMP"], ["rtmp_push", "RTMP-Push"], ["dash", "Dash"], ["rtsp", "RTSP"], ["rtp", "RTP"], ["udp", "UDP"], ["tcp", "TCP"], ["srt", "SRT"], ["srt_listener", "SRT Listener"], ["file", "FILE"]),
   sizes: ["3840x2160", "2560x1440", "1920x1080", "1600x900", "1280x720", "1024x576", "960x540", "854x480", "720x576", "720x480", "640x360", "480x270"]
 };
-const XVENC = [F.s("codec", "codec", XO.vcodec), F.t("size", "size", { ph: "Auto", dl: XO.sizes }), F.s("rc", "rc", opts(["cbr", "CBR"], ["vbr", "VBR"], ["cq", "CQ"])), F.n("bitrate", "bitrate kbps"), F.n("maxrate", "max kbps"), F.t("name", "label", { ph: "FHD" })];
+const XVENC = [F.s("codec", "codec", XO.vcodec), F.t("size", "size", { ph: "Auto", dl: XO.sizes }), F.s("rc", "rc", opts(["cbr", "CBR"], ["vbr", "VBR"], ["cq", "CQ"])), F.n("bitrate", "bitrate kbps"), F.n("maxrate", "max bitrate kbps", { ph: "auto" }), F.n("cq", "CQ", { ph: "23" })];
+const XVENCM = [F.t("name", "label", { ph: "FHD" })];
+const RCF = { cbr: ["bitrate"], vbr: ["bitrate", "maxrate"], cq: ["cq", "maxrate"] };
 const XAENC = [F.s("codec", "codec", XO.acodec), F.n("bitrate", "bitrate kbps")];
-const XOUT = [F.s("type", "type", XO.out), F.ints("video", "Video Encoders", { ph: "0,1" }), F.ints("audio", "Audio Encoders", { ph: "0" }), F.n("hls_time", "Time"), F.n("hls_list", "List Size"), F.t("name", "Name (path)|الاسم (المسار)", { ph: "o0" }),
-  F.t("url", "URL", { ph: "rtmp://host/app/key · srt://0.0.0.0:9000 · udp://239.0.0.1:1234" }), F.n("port", "Port"), F.p("passphrase", "SRT passphrase"), F.n("latency", "SRT latency ms"), F.b("disabled", "Disabled|معطل")];
+const OPUSH = "rtmp rtmp_push rtsp srt udp tcp rtp file", OHLS = "hls hls_master";
+const XOUT = [F.es("video", "Video Encoders", "v"), F.es("audio", "Audio Encoders", "a"), F.n("hls_time", "Time", { for: OHLS + " dash", u: "s", ph: "6" }), F.n("hls_list", "List Size", { for: OHLS + " dash", ph: "5" }),
+  F.n("buffer", "Buffer Size", { for: "http", u: "KB", ph: "16384" }), F.t("filename", "Filename", { for: OHLS + " http", ph: "index" }),
+  F.t("url", "URL", { for: OPUSH, ph: "rtmp://host/app/key · srt://host:9000 · udp://239.0.0.1:1234 · /path/file.ts" }), F.n("port", "Port", { for: "srt_listener" }), F.p("passphrase", "Passphrase", { for: "srt srt_listener" }), F.n("latency", "Latency", { for: "srt srt_listener", u: "ms" }), F.yn("disabled", "Disabled|معطل")];
+const CODN = { copy: "Copy", mpeg2: "MPEG-2", h264: "H.264", hevc: "H.265", av1: "AV1", aac: "AAC", mp3: "MP3", mp2: "MP2", fdk_aac: "AAC", ac3: "AC3", opus: "Opus" };
 const XVIDEO = p => [
   F.s(p + "video_sync", "Video Sync Method", XO.vsync, { ...PO, hint: "Pass Through keeps source timestamps|يحافظ على توقيت المصدر" }),
   F.s(p + "hwaccel", "Hardware Acceleration Method", XO.hwm, { ...PO, hint: "Full = decode+scale+encode on GPU|Full = فك وتحجيم وترميز على GPU" })];
 const XVIDEO2 = p => [
-  F.rows(p + "video_encoders", "Video Encoder|ترميز الفيديو", XVENC, PO),
+  F.rows(p + "video_encoders", "Video Encoder|ترميز الفيديو", XVENC, { ...PO, xe: "Video Encoder", more: XVENCM, v: 1 }),
   F.s(p + "preset", "Video Preset", XO.preset, { ...PO, hint: "x264 names are mapped to NVENC presets automatically|أسماء x264 بتتحول لـ NVENC تلقائياً" }), F.s(p + "profile", "Video Profile", XO.vprof, PO), F.s(p + "level", "Video Level", XO.level, PO),
   F.s(p + "frame_rate", "Video Frame Rate", XO.fps, { ...PO, u: "fps" }), F.n(p + "gop", "Keyframe Interval", { ...PO, u: "frames" }), F.yn(p + "deinterlace", "Video Deinterlace", PO),
   F.s(p + "pix_fmt", "Video Pixel Format", XO.pix, PO), F.s(p + "dar", "Display Aspect Ratio", XO.dar, PO),
   F.g("Overlay Image", [F.fs(p + "overlay_file", "file", { ext: IMG }), F.t(p + "overlay_x", "x", { ph: "W-w" }), F.t(p + "overlay_y", "y", { ph: "0" }), F.n(p + "overlay_opacity", "opacity", { ph: "1" })], { ...PO, more: [F.n(p + "overlay_scale", "width px")] }),
   F.g("Overlay Text", [F.t(p + "text", "text"), F.t(p + "text_x", "x"), F.t(p + "text_y", "y")], { ...PO, more: [F.n(p + "text_size", "size"), F.t(p + "text_color", "color", { ph: "white" }), F.yn(p + "text_scroll", "scroll")] })];
-const XAUDIO = p => [F.rows(p + "audio_encoders", "Audio Encoder|ترميز الصوت", XAENC, PO), F.s(p + "audio_channels", "Audio Channels", XO.ach, PO), F.s(p + "audio_rate", "Audio Sample Rate", XO.arate, { ...PO, u: "Hz" }), F.rg(p + "audio_volume", "Audio Volume", { ...PO, min: 0, max: 3, step: 0.05, def: 1 })];
+const XAUDIO = p => [F.rows(p + "audio_encoders", "Audio Encoder|ترميز الصوت", XAENC, { ...PO, xe: "Audio Encoder" }), F.s(p + "audio_channels", "Audio Channels", XO.ach, PO), F.s(p + "audio_rate", "Audio Sample Rate", XO.arate, { ...PO, u: "Hz" }), F.rg(p + "audio_volume", "Audio Volume", { ...PO, min: 0, max: 3, step: 0.05, def: 1 })];
 const XSUB = p => [F.s(p + "sub_mode", "Subtitle Encoder", XO.sub, { ...PO, hint: "Overlay = burn into picture, Copy Restream = WebVTT in HLS|Overlay = حرق على الصورة، Copy Restream = WebVTT بالـ HLS" }),
   F.g("Subtitle Options|خيارات الترجمة", [F.fs(p + "sub_file", "file", { ext: SUBX }), F.t(p + "sub_lang", "lang", { ph: "ar" }), F.n(p + "sub_font_size", "font"), F.t(p + "txt_page", "teletext")], PO)];
 const XMORE = p => [F.t(p + "tune", "Video Tune", { ...PO, ph: "ll / zerolatency" }), F.n(p + "bframes", "B-Frames", PO), F.yn(p + "audio_normalize", "Audio Normalize", PO), F.n(p + "audio_delay", "Audio Delay", { ...PO, u: "ms" }), F.a(p + "extra_args", "Extra ffmpeg args|خيارات ffmpeg إضافية", PO)];
@@ -143,7 +148,7 @@ const SCHEMAS = {
       "Advanced Options|خيارات متقدمة": [F.t("transcode.pid_map", "PID Map"), F.t("transcode.service_name", "Service Name"), F.t("transcode.service_provider", "Service Provider"), F.s("transcode.color_range", "Color Range", XO.crange),
         F.g("Color Space", [F.s("transcode.colorspace", "colorspace", XO.cspace), F.s("transcode.color_primaries", "color primaries", XO.cprim), F.s("transcode.color_trc", "color trc", XO.ctrc)]),
         F.g("Memory Limit", [F.n("mem_max_mb", "max system memory MB"), F.n("gpu_mem_max_mb", "max graphics memory MB")]), F.g("Speed Limit", [F.n("speed_min", "min speed")]), F.r("balancer_id", "Balancers", "balancer", { none: "None" }), F.yn("transcode.remove_cc", "Remove CC"), ...XMORE("transcode.")],
-      "_out": [F.rows("outputs", "Add Output|إضافة مخرج", XOUT)],
+      "_out": [F.outs("outputs", "Output")],
       "General|عام": [F.r("category", "Category|التصنيف", "category"), F.s("type", "Type|النوع", opts(["linear", "Live|مباشر"], ["event", "Event|حدث"], ["vod", "VOD"])), F.yn("enabled", "Enabled (always on)|مفعّل (دائماً)"), F.yn("on_demand", "On demand|عند الطلب"), F.fs("logo", "Logo|اللوغو", { ext: IMG }), F.t("epg_id", "EPG ID"), F.n("order", "Order|الترتيب"), F.a("note", "Note|ملاحظة")],
       "DRM & subtitles|DRM والترجمة": [F.b("drm.enabled", "DRM source (DASH/HLS CENC)|مصدر DRM"), F.s("drm.vendor", "System|النظام", opts("clearkey", "widevine", "playready")), F.s("drm.mode", "Key mode|المفاتيح", opts(["keys", "Static KID:KEY|مفاتيح ثابتة"], ["keyserver", "Key server URL|سيرفر مفاتيح"], ["script", "Script"])), F.li("drm_keys", "KID:KEY (one per line)|المفاتيح KID:KEY", { w: 1, mono: 1 }), F.t("drm.key_server", "Key server URL ({kid} {pssh} {id})|رابط المفاتيح"), F.t("drm.license_url", "License URL"), F.kvs("drm.headers", "Request headers|الهيدرز", { w: 1 }),
         F.t("drm.video", "Video track|مسار الفيديو", { ph: "best / worst / id" }), F.t("drm.audio", "Audio tracks|مسارات الصوت", { ph: "all / first / ar" }), F.h("Embedded subtitles|الترجمة المدمجة"), F.t("drm.subtitles", "Subtitles (WebVTT/TTML from manifest)|الترجمة من الرابط", { ph: "all / none / ar / en" }), F.b("drm.sub_burn", "Burn into video|حرق على الصورة"), F.t("drm.sub_translate", "Live translate to|ترجمة فورية إلى", { ph: "ar" }),
@@ -282,11 +287,11 @@ async function fieldHTML(f, obj, path) {
   const k = path || f.k, v = get(obj, f.k), id = "f_" + k.replace(/\W/g, "_"), lab = `<label for="${id}">${L(f.l)}</label>`, ph = f.ph ? ` placeholder="${esc(f.ph)}"` : "";
   const hint = f.hint ? `<span class="hq" title="${esc(L(f.hint))}">?</span>` : "", U = c => f.u ? `<div class="ig">${c}<span>${esc(f.u)}</span></div>` : c;
   const dl = f.dl ? ` list="${id}_dl"` : "", dlh = f.dl ? `<datalist id="${id}_dl">${f.dl.map(x => `<option value="${esc(x)}">`).join("")}</datalist>` : "";
-  const wrap = (inner, w) => `<div class="f${f.w || w ? " w" : ""}${f.cls ? " " + f.cls : ""}" data-k="${esc(f.k)}" data-ty="${f.ty}"${f.po ? " data-po" : ""}>${inner}${hint}</div>`;
+  const wrap = (inner, w) => `<div class="f${f.w || w ? " w" : ""}${f.cls ? " " + f.cls : ""}" data-k="${esc(f.k)}" data-ty="${f.ty}"${f.po ? " data-po" : ""}${f.for ? ` data-for="${f.for}"` : ""}>${inner}${hint}</div>`;
   switch (f.ty) {
     case "head": return `<div class="f w"><div style="font-weight:700;margin-top:8px;padding-bottom:6px;border-bottom:1px solid var(--line)">${L(f.l)}</div></div>`;
     case "text": case "pass": return wrap(lab + U(`<input class="in${f.mono ? " mono ltr" : ""}" id="${id}" type="${f.ty === "pass" ? "password" : "text"}" value="${esc(v ?? "")}"${ph}${dl} autocomplete="off">${dlh}`));
-    case "num": return wrap(lab + U(`<input class="in" id="${id}" type="number" step="any" value="${v ?? ""}"${ph}>`));
+    case "num": return wrap(lab + U(`<input class="in ltr" lang="en" dir="ltr" id="${id}" type="number" step="any" value="${v || ""}"${ph}>`));
     case "yn": return wrap(lab + `<select class="in" id="${id}"><option value="1"${v ? " selected" : ""}>${L("Yes|نعم")}</option><option value="0"${v ? "" : " selected"}>${L("No|لا")}</option></select>`);
     case "range": { const x = v || f.def || 0; return wrap(lab + `<div class="rg"><input type="range" id="${id}" min="${f.min}" max="${f.max}" step="${f.step}" value="${x}" oninput="this.nextElementSibling.textContent=this.value"><b>${x}</b></div>`); }
     case "ms": { const set = new Set(v || []); return wrap(lab + `<div class="ms">${f.o.map(([a, b]) => `<label><input type="checkbox" value="${esc(a)}"${set.has(a) ? " checked" : ""}>${esc(L(b))}</label>`).join("")}</div>`); }
@@ -305,13 +310,29 @@ async function fieldHTML(f, obj, path) {
     case "sel": { const o = typeof f.o === "function" ? f.o() : f.o; return wrap(lab + U(`<select class="in" id="${id}">${o.map(([a, b]) => `<option value="${esc(a)}"${String(a) === String(v ?? o[0][0]) ? " selected" : ""}>${esc(L(b))}</option>`).join("")}</select>`)); }
     case "ref": { const l = await loadRef(f.kind); return wrap(lab + `<select class="in" id="${id}"><option value="0">${f.none ? esc(L(f.none)) : "—"}</option>${l.map(x => `<option value="${x.id}"${x.id === v ? " selected" : ""}>${esc(x.name || x.username)}</option>`).join("")}</select>`); }
     case "refs": { const l = await loadRef(f.kind), sel = new Set(v || []); return wrap(lab + `<input class="in" placeholder="${L("Filter…|بحث…")}" data-filter style="margin-bottom:6px"><div class="multi">${l.map(x => `<label><input type="checkbox" value="${x.id}"${sel.has(x.id) ? " checked" : ""}>${esc(x.name || x.username)}</label>`).join("") || `<span class="mut">${L("Nothing yet|لا يوجد")}</span>`}</div>`); }
-    case "rows": { const arr = v || []; let h = ""; for (let i = 0; i < arr.length; i++) h += await rowHTML(f, arr[i]); return wrap(lab + `<div class="rows">${h}</div><button type="button" class="btn s" data-add>${ico("plus")} ${L("Add|إضافة")}</button>`, 1); }
+    case "es": return wrap(lab + `<div class="esel" data-src="${f.src}" data-v="${Array.isArray(v) && v.length ? esc(JSON.stringify(v)) : ""}"><div class="ebox" tabindex="0"><div class="etags"></div><span class="ecar">▾</span></div><div class="edd"></div></div>`);
+    case "outs": { const arr = v || []; let h = ""; for (let i = 0; i < arr.length; i++) h += await outRow(arr[i], i, 1);
+      return `<div class="f xrows xouts" data-k="${esc(f.k)}" data-ty="outs"><div class="rows">${h}</div><div class="xadd"><button type="button" class="btn p" data-oadd>${ico("plus")} ${L("Add Output|إضافة مخرج")}</button></div></div>`; }
+    case "rows": { const arr = v || []; let h = ""; for (let i = 0; i < arr.length; i++) h += await rowHTML(f, arr[i], i);
+      if (f.xe) return `<div class="f xrows" data-k="${esc(f.k)}" data-ty="rows"${f.po ? " data-po" : ""}><div class="rows">${h}</div><div class="xadd"><button type="button" class="btn s" data-add>${ico("plus")} ${L("Add|إضافة")} ${L(f.xe)}</button></div></div>`;
+      return wrap(lab + `<div class="rows">${h}</div><button type="button" class="btn s" data-add>${ico("plus")} ${L("Add|إضافة")}</button>`, 1); }
   }
   return "";
 }
 const urlRow = (u, i) => `<div class="ib url"><div class="ul"><small>URL #${i + 1}</small><input class="in ltr" value="${esc(u)}" placeholder="http:// · https:// · srt:// · rtmp:// · udp:// · rtsp://"></div><button type="button" class="btn p" data-umain title="Main|رئيسي">⇄</button><button type="button" class="btn p" data-uopt title="Source options|خيارات المصدر">${ico("set")}</button><button type="button" class="btn" data-uadd title="+">${ico("plus")}</button>${i ? `<button type="button" class="btn d" data-urm>${ico("del")}</button>` : ""}</div>`;
 const loadFiles = async () => S.cache.files || (S.cache.files = await api("files").catch(() => []));
-async function rowHTML(f, o) { let h = ""; for (const sf of f.f) h += await fieldHTML(sf, o || {}); return `<div class="row"><button type="button" class="btn i s d x" data-rm>${ico("del")}</button><div class="form">${h}</div></div>`; }
+async function outRow(o, i, saved) {
+  let h = ""; for (const sf of XOUT) h += await fieldHTML(sf, o);
+  const t = o.type || "hls";
+  return `<div class="row xo" data-oi="${saved ? i : -1}" data-name="${esc(o.name || "")}"><label class="xl">${L("Output|مخرج")} #<span class="xn">${i + 1}</span></label><div class="xeb"><div class="xoh"><select class="in otype">${XO.out.map(([a, b]) => `<option value="${a}"${a === t ? " selected" : ""}>${esc(L(b))}</option>`).join("")}</select><input class="in ltr ourl" readonly><button type="button" class="btn" data-ocopy title="${L("Copy|نسخ")}">${ico("copy")}</button><button type="button" class="btn p" data-oset title="${L("Settings|الإعدادات")}">${ico("set")}</button><button type="button" class="btn d" data-orm>${ico("del")}</button></div><div class="form oset"${saved ? ' style="display:none"' : ""}>${h}</div></div></div>`;
+}
+async function rowHTML(f, o, i = 0) {
+  let h = ""; for (const sf of f.f) h += await fieldHTML(sf, o || {});
+  if (f.xe) {
+    let mh = ""; for (const sf of f.more || []) mh += await fieldHTML(sf, o || {});
+    return `<div class="row xe${f.v ? " xv" : ""}"><label class="xl">${L(f.xe)} #<span class="xn">${i + 1}</span></label><div class="xeb"><div class="xet"></div><div class="form xeg">${h}<div class="xbt">${mh ? `<button type="button" class="btn p" data-rset>${ico("set")}</button>` : ""}<button type="button" class="btn" data-radd>${ico("plus")}</button><button type="button" class="btn d" data-rm>${ico("del")}</button></div></div>${mh ? `<div class="form xem" style="display:none">${mh}</div>` : ""}</div></div>`;
+  }
+  return `<div class="row"><button type="button" class="btn i s d x" data-rm>${ico("del")}</button><div class="form">${h}</div></div>`; }
 function readField(el, obj) {
   const k = el.dataset.k, ty = el.dataset.ty, inp = $("input,select,textarea", el);
   let v;
@@ -332,7 +353,9 @@ function readField(el, obj) {
     case "sel": v = inp.value; if (/^-?\d+$/.test(v) && typeof get(obj, k) !== "string") v = +v; break;
     case "ref": v = +inp.value; break;
     case "refs": v = $$(".multi input:checked", el).map(x => +x.value); break;
-    case "rows": v = $$(":scope > .rows > .row", el).map(r => { const o = {}; $$(":scope > .form > .f[data-k]", r).forEach(e => readField(e, o)); return o; }); break;
+    case "rows": v = $$(":scope > .rows > .row", el).map(r => { const o = {}; $$(":scope > .form > .f[data-k], :scope > .xeb > .form > .f[data-k]", r).forEach(e => readField(e, o)); return o; }); break;
+    case "es": { const d = $(".esel", el).dataset.v; v = d ? JSON.parse(d) : []; break; }
+    case "outs": v = $$(":scope > .rows > .row", el).map((r, i) => { const o = { ...(get(obj, k) || [])[+r.dataset.oi] }; delete o.url; o.type = $(".otype", r).value; if (r.dataset.name) o.name = r.dataset.name; $$(".oset > .f[data-k]", r).forEach(e => (!e.dataset.for || e.dataset.for.split(" ").includes(o.type)) ? readField(e, o) : delete o[e.dataset.k]); return o; }); break;
     default: return;
   }
   set(obj, k, v);
@@ -351,8 +374,27 @@ function bindForm(root, fields) {
       if ("more" in d) { const g = $(".gmore", ub.closest(".grp")); g.style.display = g.style.display === "none" ? "" : "none"; }
       if (box) $$(".url", box).forEach((r, i) => { $("small", r).textContent = "URL #" + (i + 1); const x = $("[data-urm]", r); if (!i && x) x.remove(); if (i && !x) r.insertAdjacentHTML("beforeend", `<button type="button" class="btn d" data-urm>${ico("del")}</button>`); });
     }
-    if (add) { const fe = add.closest(".f"), f = findField(fields, fe.dataset.k); if (f) $(".rows", fe).insertAdjacentHTML("beforeend", await rowHTML(f, {})); }
+    if (add) { const fe = add.closest(".f"), f = findField(fields, fe.dataset.k); if (f) $(".rows", fe).insertAdjacentHTML("beforeend", await rowHTML(f, f.xe ? structuredClone(f.v ? { codec: "h264", rc: "cbr", bitrate: 4000 } : { codec: "aac", bitrate: 128 }) : {}, $$(".rows > .row", fe).length)); }
+    const xb = e.target.closest("[data-radd],[data-rset],[data-oadd],[data-orm],[data-oset],[data-ocopy]");
+    if (xb) {
+      const d = xb.dataset, row = xb.closest(".row"), fe = xb.closest(".f.xrows");
+      if ("radd" in d) { const f = findField(fields, fe.dataset.k); row.insertAdjacentHTML("afterend", await rowHTML(f, f.v ? { codec: "h264", rc: "cbr", bitrate: 4000 } : { codec: "aac", bitrate: 128 })); }
+      if ("rset" in d) { const g = $(".xem", row); g.style.display = g.style.display === "none" ? "" : "none"; }
+      if ("oadd" in d) $(".rows", fe).insertAdjacentHTML("beforeend", await outRow({ type: "hls" }, $$(".rows > .row", fe).length));
+      if ("orm" in d) row.remove();
+      if ("oset" in d) { const g = $(".oset", row); g.style.display = g.style.display === "none" ? "" : "none"; }
+      if ("ocopy" in d) { const u = $(".ourl", row).value; navigator.clipboard?.writeText(u).then(() => toast(L("Copied|تم النسخ")), () => { $(".ourl", row).select(); document.execCommand("copy"); }); }
+    }
+    if (rm || xb) xRefresh(root);
+    const es = e.target.closest(".esel");
+    $$(".esel.open", root).forEach(x => x !== es && x.classList.remove("open"));
+    if (es) {
+      const o = e.target.closest(".eo"), a = e.target.closest("[data-eall],[data-enone]");
+      if (o || a) { const cur = esVal(es), n = $$(".eo", es).length; let nv = a ? ("eall" in a.dataset ? [...Array(n).keys()] : []) : cur.includes(+o.dataset.i) ? cur.filter(x => x !== +o.dataset.i) : [...cur, +o.dataset.i].sort((x, y) => x - y); es.dataset.v = JSON.stringify(nv); es.dataset.set = 1; xRefresh(root); }
+      else if (e.target.closest(".ebox")) es.classList.toggle("open");
+    }
   });
+  root.addEventListener("input", () => xRefresh(root)); root.addEventListener("change", e => !e.target.matches("[data-fup]") && xRefresh(root));
   root.addEventListener("change", async e => {
     if (!e.target.matches("[data-fup]")) return; const fl = e.target.files[0]; if (!fl) return;
     const fd = new FormData(); fd.append("file", fl); const r = await tryDo(() => api("files", { method: "POST", body: fd }), fl.name + " ✓"); if (!r) return;
@@ -362,6 +404,56 @@ function bindForm(root, fields) {
   root.addEventListener("input", e => { if (e.target.matches("[data-filter]")) { const q = e.target.value.toLowerCase(); $$(".multi label", e.target.parentNode).forEach(l => l.style.display = l.textContent.toLowerCase().includes(q) ? "" : "none"); } });
 }
 const findField = (fields, k) => fields.find(f => f.k === k);
+const readRow = r => { const o = {}; $$(":scope > .form > .f[data-k], :scope > .xeb > .form > .f[data-k]", r).forEach(e => readField(e, o)); return o; };
+const ccls = c => ({ h264: "c264", hevc: "c265", av1: "cav1", mpeg2: "cm2", copy: "ccp" }[c] || "cau");
+function encList(root) {
+  const ps = $("[data-k=profile_id] select", root), pr = ps && +ps.value > 0 ? (S.cache.profile || []).find(x => x.id === +ps.value) : null;
+  const rows = k => $$(`[data-k$="${k}"] > .rows > .row`, root).map(readRow);
+  const ve = pr ? pr.transcode?.video_encoders || [] : rows("video_encoders"), ae = pr ? pr.transcode?.audio_encoders || [] : rows("audio_encoders");
+  return {
+    v: ve.map(x => ({ c: x.codec, t: x.codec === "copy" ? "Copy" : `${CODN[x.codec] || x.codec} ${x.size || "Auto"}${x.bitrate ? " " + x.bitrate + " kbps" : ""}` })),
+    a: ae.map(x => ({ c: x.codec, t: x.codec === "copy" ? "Copy" : `${CODN[x.codec] || x.codec}${x.bitrate ? " " + x.bitrate + " kbps" : ""}` }))
+  };
+}
+const esVal = es => es.dataset.v ? JSON.parse(es.dataset.v) : [];
+function outURL(root, row, i, types) {
+  const t = $(".otype", row).value, q = k => $(`.oset [data-k=${k}] input`, row)?.value.trim() || "", id = root.dataset.sid || "ID", st = S.pub || {};
+  const host = st.public_host || location.hostname, base = st.public_host ? `${location.protocol}//${st.public_host}${location.port && !st.public_host.includes(":") ? ":" + location.port : ""}` : location.origin;
+  const kind = x => x === "hls_master" ? "hls" : x, file = q("filename") || (types.slice(0, i).some(x => kind(x) === kind(t)) ? String(i + 1) : "index"), gw = id + (row.dataset.name ? "_" + row.dataset.name : "");
+  if (kind(t) === "hls") return `${base}/stream/${id}/${file}.m3u8`;
+  if (t === "http") return `${base}/stream/${id}/${file}.ts`;
+  if (t === "dash") return `${base}/hls/${id}/${row.dataset.name || "o" + i}/manifest.mpd`;
+  if (t === "srt_listener") return `srt://${host}:${q("port") || "PORT"}`;
+  if (q("url")) return q("url");
+  return { rtmp: `rtmp://${host}:1935/live/${gw}`, rtsp: `rtsp://${host}:8554/live/${gw}`, srt: `srt://${host}:8890?streamid=read:live/${gw}` }[t] || "";
+}
+const CPHIDE = ["hwaccel", "preset", "profile", "level", "frame_rate", "gop", "deinterlace", "pix_fmt", "dar", "overlay_file", "text", "audio_channels", "audio_rate", "audio_volume", "tune", "bframes", "audio_normalize"];
+function xRefresh(root) {
+  const L2 = encList(root), hw = $("[data-k=\"transcode.hwaccel\"] select", root)?.value, gpu = $("[data-k=gpu] select", root)?.value, hwt = hw === "none" || gpu === "-1" ? "CPU" : hw === "qsv" ? "QSV" : "NVENC";
+  $$(".xrows > .rows", root).forEach(b => $$(":scope > .row", b).forEach((r, i) => { const n = $(".xn", r); if (n) n.textContent = i + 1; }));
+  $$(".row.xe", root).forEach(r => {
+    const c = $("[data-k=codec] select", r)?.value || "", cp = c === "copy";
+    $(".xet", r).innerHTML = `<span class="tg ${ccls(c)}">${esc(CODN[c] || c)}</span>${cp ? `<span class="tg rs">Restream</span>` : r.classList.contains("xv") ? `<span class="tg hw">${hwt}</span>` : ""}`;
+    $$(".xeg > .f:not([data-k=codec]), [data-rset], .xem", r).forEach(e => { if (cp) e.style.display = "none"; else if (!e.classList.contains("xem")) e.style.display = ""; });
+    if (!cp && r.classList.contains("xv")) { const rc = RCF[$("[data-k=rc] select", r)?.value] || RCF.cbr; ["bitrate", "maxrate", "cq"].forEach(k => { const e = $(`.xeg > .f[data-k=${k}]`, r); if (e) e.style.display = rc.includes(k) ? "" : "none"; }); }
+  });
+  const vc = $$(".row.xv [data-k=codec] select", root).map(x => x.value), allCp = vc.length > 0 && vc.every(x => x === "copy");
+  $$(CPHIDE.map(k => `.f[data-k$="${k}"]`).join(","), root).forEach(e => e.style.display = allCp ? "none" : "");
+  const sm = $("[data-k$=\"sub_mode\"]", root);
+  if (sm) { let t = $(".smt", sm); if (!t) { t = document.createElement("span"); t.className = "smt"; $("select", sm)?.after(t); } t.innerHTML = $("select", sm)?.value === "copy" ? `<span class="tg rs">Restream</span>` : ""; }
+  const rows = $$(".xouts > .rows > .row", root), types = rows.map(r => $(".otype", r).value);
+  rows.forEach((r, i) => {
+    const t = types[i]; $(".ourl", r).value = outURL(root, r, i, types);
+    $$(".oset > .f[data-for]", r).forEach(f => f.style.display = f.dataset.for.split(" ").includes(t) ? "" : "none");
+    $$(".esel", r).forEach(es => {
+      const src = es.dataset.src, list = L2[src];
+      if (!es.dataset.v && !es.dataset.set) es.dataset.dv = JSON.stringify(src === "a" || t === "hls" || t === "hls_master" || t === "dash" ? [...list.keys()] : list.length ? [0] : []);
+      const sel = es.dataset.v ? esVal(es) : es.dataset.set ? [] : JSON.parse(es.dataset.dv);
+      $(".etags", es).innerHTML = sel.filter(x => x < list.length).map(x => `<span class="tg ${ccls(list[x].c)}">${esc(list[x].t)}</span>`).join("") || `<span class="mut">${L("None|لا شيء")}</span>`;
+      $(".edd", es).innerHTML = `<div class="eact"><a data-eall>${L("Select All|تحديد الكل")}</a><a data-enone>${L("Deselect All|إلغاء الكل")}</a></div>` + list.map((x, j) => `<div class="eo${sel.includes(j) ? " on" : ""}" data-i="${j}"><span class="tg ${ccls(x.c)}">${esc(x.t)}</span><i>✓</i></div>`).join("");
+    });
+  });
+}
 async function editModal(kind, item, onSaved) {
   const sc = SCHEMAS[kind], isNew = !item?.id, obj = structuredClone(item?.id ? item : { ...(sc.def ? structuredClone(sc.def) : {}), ...(item || {}) });
   if (kind === "user" && isNew && !obj.password) { obj.username = obj.username || "u" + Math.random().toString(36).slice(2, 8); obj.password = Math.random().toString(36).slice(2, 12); }
@@ -373,7 +465,8 @@ async function editModal(kind, item, onSaved) {
   const ps = $("[data-k=profile_id] select", m), pn = $("#pnote", m);
   if (ps && pn) { const upd = () => { const on = +ps.value > 0; $$("[data-po]", m).forEach(e => e.style.display = on ? "none" : ""); pn.style.display = on ? "" : "none"; $("b", pn).textContent = on ? ps.selectedOptions[0].textContent : ""; }; ps.addEventListener("change", upd); upd(); }
   if ($$(".srcopt", m).some(e => { const i = $("input,textarea,select", e); return i && (i.type === "checkbox" ? i.checked : i.value && i.value !== "0"); })) $$(".srcopt", m).forEach(x => x.classList.add("on"));
-  bindForm(m, all);
+  if (kind === "stream") { m.dataset.sid = obj.id || ""; if (!S.pub) S.pub = await api("settings").catch(() => ({})); }
+  bindForm(m, all); xRefresh(m);
   $$("[data-tab]", m).forEach(a => a.onclick = () => { $$("[data-tab]", m).forEach(x => x.classList.toggle("on", x === a)); $$(".tp", m).forEach(p => p.style.display = p.dataset.t === a.dataset.tab ? "" : "none"); });
   $("#probe", m) && ($("#probe", m).onclick = async () => {
     const url = ($("[data-k=inputs] .url input", m)?.value || "").trim(); if (!url) return toast(L("Add a source first|أضف مصدراً أولاً"), 1);

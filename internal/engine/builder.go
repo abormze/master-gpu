@@ -23,6 +23,7 @@ type BuildOpts struct {
 	FFmpegVer  int      // major version
 	CENC       bool     // inputs are CENC DASH manifests (dash demuxer key option)
 	AudioInput int      // input index that supplies audio (DRM with separate audio key)
+	CopyTS     bool     // keep source timestamps (separate DRM track inputs share one timeline)
 }
 
 func isCopy(t *models.Transcode) bool {
@@ -90,6 +91,9 @@ func audioEnc(c string) string {
 
 func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
 	a := []string{"-hide_banner", "-nostdin", "-loglevel", "warning", "-progress", "pipe:1", "-stats_period", "2"}
+	if o.CopyTS {
+		a = append(a, "-copyts")
+	}
 	in := o.Input
 	u, _ := url.Parse(in)
 	scheme := ""
@@ -402,16 +406,20 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 				if mr == 0 {
 					mr = v.Bitrate
 					if rc == "vbr" {
-						mr = v.Bitrate * 3 / 2
+						mr = v.Bitrate * 2
 					}
 				}
-				a = append(a, "-maxrate:v:"+vi, strconv.Itoa(mr)+"k", "-bufsize:v:"+vi, strconv.Itoa(mr*2)+"k")
-				if nv {
-					if rc == "vbr" {
-						a = append(a, "-rc:v:"+vi, "vbr")
-					} else {
-						a = append(a, "-rc:v:"+vi, "cbr")
+				if rc == "vbr" {
+					a = append(a, "-maxrate:v:"+vi, strconv.Itoa(mr)+"k", "-bufsize:v:"+vi, strconv.Itoa(mr*2)+"k")
+				} else {
+					// CBR: tight 1s VBV so the output stays on the configured bitrate
+					a = append(a, "-minrate:v:"+vi, br, "-maxrate:v:"+vi, br, "-bufsize:v:"+vi, br)
+					if name == "libx264" {
+						a = append(a, "-nal-hrd:v:"+vi, "cbr")
 					}
+				}
+				if nv {
+					a = append(a, "-rc:v:"+vi, map[bool]string{true: "vbr", false: "cbr"}[rc == "vbr"])
 				}
 			}
 		}
@@ -519,13 +527,25 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	var slaves []string
 	var variants []Variant
 	served := map[string]bool{}
+	httpN := 0
+	// re-send encoder SPS/PPS on keyframes so TS viewers can join mid-stream;
+	// copied streams get them from mp4toannexb; video streams are mapped first so index == stream index
+	dx := func(vs []int) string {
+		r := ""
+		for _, v := range vs {
+			if v < len(venc) && !copyMode && venc[v].Codec != "copy" {
+				r += fmt.Sprintf(":bsfs/%d=dump_extra", v)
+			}
+		}
+		return r
+	}
 	for oi, out := range s.Outputs {
 		if out.Disabled {
 			continue
 		}
 		vs := out.Video
 		as := out.Audio
-		master := out.Type == "hls_master" || (out.Type == "hls" && len(vs) == 0 && nv_ > 1)
+		master := out.Type == "hls_master" || (out.Type == "hls" && (len(vs) > 1 || len(vs) == 0 && nv_ > 1))
 		if len(vs) == 0 {
 			vs = []int{0}
 		}
@@ -580,6 +600,8 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 				fmp4 := ""
 				if v < len(venc) && isHEVC(venc[v].Codec) {
 					seg, fmp4 = "%d.m4s", ":hls_segment_type=fmp4:hls_fmp4_init_filename=init.mp4"
+				} else {
+					fmp4 = dx([]int{v})
 				}
 				opt := fmt.Sprintf("select=\\'%s\\':f=hls:hls_time=%d:hls_list_size=%d:hls_flags=%s:hls_delete_threshold=2:hls_allow_cache=0%s:hls_segment_filename=%s", sel, hlsTime, hlsList, flags, fmp4, escTee(filepath.Join(dir, seg)))
 				if o.FFmpegVer >= 5 && hasSubs {
@@ -594,7 +616,10 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			sel := selector(vs, as, nv_, na)
 			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=dash:seg_duration=%d:window_size=%d:remove_at_exit=1:use_template=1:use_timeline=1:streaming=1]%s", sel, hlsTime, hlsList, escTee(filepath.Join(dir, "manifest.mpd"))))
 		case "http":
-			// served by the panel from the shared TS pipe
+			if o.HTTPPipe {
+				slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=mpegts:mpegts_flags=+resend_headers%s:onfail=ignore]pipe\\:%d", selector(vs, as, nv_, na), dx(vs), 4+httpN))
+				httpN++
+			}
 		case "rtmp", "rtmp_push":
 			u := out.URL
 			if u == "" {
@@ -627,13 +652,13 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			if out.Latency > 0 && !strings.Contains(u, "latency") {
 				u += "&latency=" + strconv.Itoa(out.Latency*1000)
 			}
-			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=mpegts:onfail=ignore]%s", selector(vs, as, nv_, na), escTee(u)))
+			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=mpegts%s:onfail=ignore]%s", selector(vs, as, nv_, na), dx(vs), escTee(u)))
 		case "udp", "tcp":
 			u := out.URL
 			if out.Type == "udp" && !strings.Contains(u, "pkt_size") {
 				u += sepq(u) + "pkt_size=1316"
 			}
-			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=mpegts:onfail=ignore]%s", selector(vs, as, nv_, na), escTee(u)))
+			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=mpegts%s:onfail=ignore]%s", selector(vs, as, nv_, na), dx(vs), escTee(u)))
 		case "rtp":
 			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=rtp_mpegts:onfail=ignore]%s", selector(vs, as, nv_, na), escTee(out.URL)))
 		case "file":
@@ -645,12 +670,12 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 					f = "mp4:movflags=+frag_keyframe+empty_moov"
 				}
 			}
-			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=%s:strftime=1:onfail=ignore]%s", selector(vs, as, nv_, na), f, escTee(u)))
+			slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=%s:onfail=ignore]%s", selector(vs, as, nv_, na), f, escTee(u)))
 		}
 	}
 	if o.HTTPPipe {
 		sel := selector([]int{0}, seq(na), nv_, na)
-		slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=mpegts:mpegts_flags=+resend_headers:onfail=ignore]pipe\\:3", sel))
+		slaves = append(slaves, fmt.Sprintf("[select=\\'%s\\':f=mpegts:mpegts_flags=+resend_headers%s:onfail=ignore]pipe\\:3", sel, dx([]int{0})))
 	}
 	if len(slaves) == 0 {
 		return nil, nil, fmt.Errorf("stream has no enabled outputs")
@@ -666,7 +691,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		// keeps CUDA frames on the GPU when the decoder reinitialises (file loop, source switch)
 		a = append(a, "-autoscale", "0")
 	}
-	a = append(a, "-flags", "+global_header", "-f", "tee", "-use_fifo", "1", "-fifo_options", "drop_pkts_on_overflow=1:attempt_recovery=1:recover_any_error=1:recovery_wait_time=1:restart_with_keyframe=1", strings.Join(slaves, "|"))
+	a = append(a, "-flags", "+global_header", "-f", "tee", "-use_fifo", "1", "-fifo_options", "queue_size=4096:drop_pkts_on_overflow=1:attempt_recovery=1:recover_any_error=1:recovery_wait_time=1:restart_with_keyframe=1", strings.Join(slaves, "|"))
 	return a, variants, nil
 }
 
@@ -732,6 +757,49 @@ func codecProfile(p, enc string) string {
 		return ""
 	}
 	return p
+}
+
+// HTTPOutputs lists the 1-based numbers of enabled HTTP outputs in the order
+// their MPEG-TS pipes are passed to ffmpeg (fd 4, 5, ...).
+func HTTPOutputs(s *models.Stream) []int {
+	var r []int
+	for i, o := range s.Outputs {
+		if o.Type == "http" && !o.Disabled {
+			r = append(r, i+1)
+		}
+	}
+	return r
+}
+
+func outKind(t string) string {
+	if t == "hls_master" {
+		return "hls"
+	}
+	return t
+}
+
+// OutputFile is the public file name of output oi (Xaccel style):
+// /stream/{id}/{file}.m3u8 for HLS, /stream/{id}/{file}.ts for HTTP.
+// Unnamed outputs are "index" for the first of their kind, else their number.
+func OutputFile(s *models.Stream, oi int) string {
+	o := s.Outputs[oi]
+	if o.File != "" {
+		return o.File
+	}
+	for i := 0; i < oi; i++ {
+		if outKind(s.Outputs[i].Type) == outKind(o.Type) && s.Outputs[i].File == "" {
+			return strconv.Itoa(oi + 1)
+		}
+	}
+	return "index"
+}
+
+// OutputDir is the directory (under the stream root) holding output oi's HLS/DASH files.
+func OutputDir(s *models.Stream, oi int) string {
+	if n := s.Outputs[oi].Name; n != "" {
+		return n
+	}
+	return "o" + strconv.Itoa(oi)
 }
 
 func selector(vs, as []int, nv, na int) string {
