@@ -102,7 +102,8 @@ type VideoEnc struct {
 	Bitrate int    `json:"bitrate"`
 	Maxrate int    `json:"maxrate"`
 	CQ      int    `json:"cq"`
-	Name    string `json:"name"` // variant label e.g. FHD
+	Name    string `json:"name"`   // variant label e.g. FHD
+	Device  string `json:"device"` // "" = stream hwaccel, "cpu" = encode on CPU to offload NVENC
 }
 
 type AudioEnc struct {

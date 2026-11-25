@@ -327,19 +327,23 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 				in = fmt.Sprintf("[vs%d]", i)
 			}
 			var f []string
-			if uploadBack {
+			cpuE := nv && v.Device == "cpu"
+			if uploadBack && !cpuE {
 				f = append(f, "hwupload_cuda")
 			}
 			if v.Size != "" && v.Codec != "copy" {
 				w, h := splitSize(v.Size)
 				switch {
-				case fullHW:
+				case fullHW && !(cpuE && uploadBack):
 					f = append(f, fmt.Sprintf("scale_cuda=%s:%s", w, h))
 				case t.HWAccel == "qsv":
 					f = append(f, fmt.Sprintf("scale_qsv=w=%s:h=%s", w, h))
 				default:
 					f = append(f, fmt.Sprintf("scale=%s:%s:flags=bicubic", w, h))
 				}
+			}
+			if cpuE && fullHW && !uploadBack {
+				f = append(f, "hwdownload", "format=nv12")
 			}
 			if t.PixFmt != "" && !fullHW && t.HWAccel != "qsv" {
 				f = append(f, "format="+t.PixFmt)
@@ -365,16 +369,25 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			a = append(a, "-map", vlabels[i])
 		}
 		vi := strconv.Itoa(i)
-		name := encName(v.Codec, map[bool]string{true: "nvenc", false: t.HWAccel}[nv])
+		vnv := nv && v.Device != "cpu"
+		hw := t.HWAccel
+		if vnv {
+			hw = "nvenc"
+		} else if nv {
+			hw = "none"
+		}
+		name := encName(v.Codec, hw)
 		if copyMode || v.Codec == "copy" {
 			a = append(a, "-c:v:"+vi, "copy")
 			continue
 		}
 		a = append(a, "-c:v:"+vi, name)
-		if nv {
+		if vnv {
 			a = append(a, "-gpu:v:"+vi, strconv.Itoa(o.GPU))
 		}
-		if p := nvPreset(t.Preset, name, o.FFmpegVer); p != "" {
+		if nv && !vnv {
+			a = append(a, "-preset:v:"+vi, "veryfast")
+		} else if p := nvPreset(t.Preset, name, o.FFmpegVer); p != "" {
 			a = append(a, "-preset:v:"+vi, p)
 		}
 		if pr := codecProfile(t.Profile, name); pr != "" && !strings.HasPrefix(name, "mpeg2") {
@@ -387,13 +400,13 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			}
 			a = append(a, "-level:v:"+vi, lv)
 		}
-		if t.Tune != "" && (strings.HasPrefix(name, "libx26") || nv) {
+		if t.Tune != "" && (strings.HasPrefix(name, "libx26") || vnv) {
 			a = append(a, "-tune:v:"+vi, t.Tune)
 		}
 		rc := v.RC
 		switch rc {
 		case "cq":
-			if nv {
+			if vnv {
 				a = append(a, "-rc:v:"+vi, "vbr", "-cq:v:"+vi, strconv.Itoa(max(v.CQ, 23)), "-b:v:"+vi, "0")
 			} else {
 				a = append(a, "-crf:v:"+vi, strconv.Itoa(max(v.CQ, 23)))
@@ -418,7 +431,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 						a = append(a, "-nal-hrd:v:"+vi, "cbr")
 					}
 				}
-				if nv {
+				if vnv {
 					a = append(a, "-rc:v:"+vi, map[bool]string{true: "vbr", false: "cbr"}[rc == "vbr"])
 				}
 			}
@@ -426,7 +439,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		if t.GOP > 0 {
 			a = append(a, "-g:v:"+vi, strconv.Itoa(t.GOP), "-keyint_min:v:"+vi, strconv.Itoa(t.GOP))
 		}
-		if nv {
+		if vnv {
 			a = append(a, "-bf:v:"+vi, strconv.Itoa(t.BFrames), "-forced-idr:v:"+vi, "1")
 		}
 		if fullHW && t.FrameRate != "" {

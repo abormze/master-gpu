@@ -95,7 +95,7 @@ const XO = {
   out: opts(["hls", "HLS"], ["hls_master", "HLS-Master"], ["http", "HTTP"], ["rtmp", "RTMP"], ["rtmp_push", "RTMP-Push"], ["dash", "Dash"], ["rtsp", "RTSP"], ["rtp", "RTP"], ["udp", "UDP"], ["tcp", "TCP"], ["srt", "SRT"], ["srt_listener", "SRT Listener"], ["file", "FILE"]),
   sizes: ["3840x2160", "2560x1440", "1920x1080", "1600x900", "1280x720", "1024x576", "960x540", "854x480", "720x576", "720x480", "640x360", "480x270"]
 };
-const XVENC = [F.s("codec", "codec", XO.vcodec), F.t("size", "size", { ph: "Auto", dl: XO.sizes }), F.s("rc", "rc", opts(["cbr", "CBR"], ["vbr", "VBR"], ["cq", "CQ"])), F.n("bitrate", "bitrate kbps"), F.n("maxrate", "max bitrate kbps", { ph: "auto" }), F.n("cq", "CQ", { ph: "23" })];
+const XVENC = [F.s("codec", "codec", XO.vcodec), F.s("device", "device", opts(["", "GPU"], ["cpu", "CPU"]), { hint: "CPU = offload this quality from NVENC to the server CPU|CPU = ترميز هالجودة على معالج السيرفر لتخفيف NVENC" }), F.t("size", "size", { ph: "Auto", dl: XO.sizes }), F.s("rc", "rc", opts(["cbr", "CBR"], ["vbr", "VBR"], ["cq", "CQ"])), F.n("bitrate", "bitrate kbps"), F.n("maxrate", "max bitrate kbps", { ph: "auto" }), F.n("cq", "CQ", { ph: "23" })];
 const XVENCM = [F.t("name", "label", { ph: "FHD" })];
 const RCF = { cbr: ["bitrate"], vbr: ["bitrate", "maxrate"], cq: ["cq", "maxrate"] };
 const XAENC = [F.s("codec", "codec", XO.acodec), F.n("bitrate", "bitrate kbps")];
@@ -434,7 +434,8 @@ function xRefresh(root) {
   $$(".xrows > .rows", root).forEach(b => $$(":scope > .row", b).forEach((r, i) => { const n = $(".xn", r); if (n) n.textContent = i + 1; }));
   $$(".row.xe", root).forEach(r => {
     const c = $("[data-k=codec] select", r)?.value || "", cp = c === "copy";
-    $(".xet", r).innerHTML = `<span class="tg ${ccls(c)}">${esc(CODN[c] || c)}</span>${cp ? `<span class="tg rs">Restream</span>` : r.classList.contains("xv") ? `<span class="tg hw">${hwt}</span>` : ""}`;
+    $(".xet", r).innerHTML = `<span class="tg ${ccls(c)}">${esc(CODN[c] || c)}</span>${cp ? `<span class="tg rs">Restream</span>` : r.classList.contains("xv") ? `<span class="tg hw">${$("[data-k=device] select", r)?.value === "cpu" ? "CPU" : hwt}</span>` : ""}`;
+    const dv = $(".xeg > .f[data-k=device]", r); if (dv && !cp) dv.style.display = hwt === "NVENC" ? "" : "none";
     $$(".xeg > .f:not([data-k=codec]), [data-rset], .xem", r).forEach(e => { if (cp) e.style.display = "none"; else if (!e.classList.contains("xem")) e.style.display = ""; });
     if (!cp && r.classList.contains("xv")) { const rc = RCF[$("[data-k=rc] select", r)?.value] || RCF.cbr; ["bitrate", "maxrate", "cq"].forEach(k => { const e = $(`.xeg > .f[data-k=${k}]`, r); if (e) e.style.display = rc.includes(k) ? "" : "none"; }); }
   });
