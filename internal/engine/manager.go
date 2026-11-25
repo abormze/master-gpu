@@ -68,6 +68,7 @@ type proc struct {
 	cmd      *exec.Cmd
 	want     bool
 	hub      *Hub
+	ohubs    map[int]*Hub
 	last     time.Time // last progress
 	lowSince time.Time
 	ticks    uint64
@@ -132,6 +133,23 @@ func (m *Manager) get(id int64) *proc {
 }
 
 func (m *Manager) Hub(id int64) *Hub { return m.get(id).hub }
+
+// OutHub returns the MPEG-TS hub of HTTP output n (1-based) of a stream.
+func (m *Manager) OutHub(id int64, n int) *Hub { return m.get(id).outHub(n) }
+
+func (p *proc) outHub(n int) *Hub {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.ohubs == nil {
+		p.ohubs = map[int]*Hub{}
+	}
+	h := p.ohubs[n]
+	if h == nil {
+		h = NewHub()
+		p.ohubs[n] = h
+	}
+	return h
+}
 
 func (m *Manager) Status(id int64) Status {
 	p := m.get(id)
@@ -275,7 +293,7 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 			var pr models.Profile
 			if m.st.Get(models.KProfile, s.ProfileID, &pr) == nil {
 				s.Transcode = MergeProfile(pr.Transcode, s.Transcode)
-				if pr.GPU != nil && *pr.GPU != -3 && s.GPU == -2 {
+				if pr.GPU != nil && *pr.GPU != -3 && (s.GPU == -2 || s.GPU == -3) {
 					s.GPU = *pr.GPU
 				}
 				if s.ServerID == 0 {
@@ -329,7 +347,7 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 				continue
 			}
 			opts.Input, opts.Inputs2, opts.InputKeys = o2.Input, o2.Inputs2, o2.InputKeys
-			opts.CENC, opts.AudioInput, opts.Proxy = o2.CENC, o2.AudioInput, o2.Proxy
+			opts.CENC, opts.AudioInput, opts.Proxy, opts.CopyTS = o2.CENC, o2.AudioInput, o2.Proxy, o2.CopyTS
 		} else if m.Relay != nil {
 			opts.Proxy = m.Relay(&s)
 		}
@@ -455,13 +473,36 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 		return err.Error()
 	}
 	cmd.ExtraFiles = []*os.File{pw}
+	var ors []*os.File
+	var ohubs []*Hub
+	for _, n := range HTTPOutputs(s) {
+		r2, w2, err := os.Pipe()
+		if err != nil {
+			break
+		}
+		ors, ohubs = append(ors, r2), append(ohubs, p.outHub(n))
+		cmd.ExtraFiles = append(cmd.ExtraFiles, w2)
+	}
+	closeW := func() {
+		for _, f := range cmd.ExtraFiles {
+			f.Close()
+		}
+	}
 	if err := cmd.Start(); err != nil {
 		pr.Close()
-		pw.Close()
+		closeW()
+		for _, f := range ors {
+			f.Close()
+		}
 		return "spawn: " + err.Error()
 	}
-	pw.Close()
+	closeW()
 	go p.hub.Pump(pr)
+	for i, f := range ors {
+		h := ohubs[i]
+		h.Reset()
+		go func(f *os.File) { h.Pump(f); f.Close() }(f)
+	}
 	p.mu.Lock()
 	p.cmd = cmd
 	p.st.PID = cmd.Process.Pid
@@ -603,7 +644,11 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 			return "ffmpeg exited: " + msg
 		case <-tk.C:
 			p.mu.Lock()
-			stalled := time.Since(p.last) > timeout
+			lim := timeout
+			if p.st.Frames == 0 && !isCopy(&s.Transcode) {
+				lim = max(timeout, 60*time.Second)
+			}
+			stalled := time.Since(p.last) > lim
 			rss, ticks := sysmon.ProcStat(cmd.Process.Pid)
 			if !p.tickT.IsZero() {
 				dt := time.Since(p.tickT).Seconds()
@@ -623,7 +668,10 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 			p.mu.Unlock()
 			if stalled {
 				kill()
-				return "stall: no frames for " + timeout.String()
+				if t := tailStr(); t != "" {
+					return "stall: no frames for " + lim.String() + ": " + t
+				}
+				return "stall: no frames for " + lim.String()
 			}
 			if low {
 				kill()

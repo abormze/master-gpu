@@ -369,12 +369,78 @@ func rewritePlaylist(b []byte, q string) []byte {
 	return []byte(out.String())
 }
 
+type variant struct {
+	Label string
+	N     int
+	File  string
+}
+
+// variants lists a stream's HTTP (MPEG-TS) outputs with a quality label each, e.g. FHD/HEVC/HD/SD.
+func (s *Server) variants(x *models.Stream) []variant {
+	tc := x.Transcode
+	if x.ProfileID > 0 {
+		var pr models.Profile
+		if s.St.Get(models.KProfile, x.ProfileID, &pr) == nil {
+			tc = engine.MergeProfile(pr.Transcode, tc)
+		}
+	}
+	var r []variant
+	seen := map[string]int{}
+	for i, o := range x.Outputs {
+		if o.Disabled || outKind(o.Type) != "http" {
+			continue
+		}
+		l := o.Name
+		if l == "" && len(o.Video) > 0 && o.Video[0] < len(tc.VideoEncoders) {
+			l = qualityLabel(tc.VideoEncoders[o.Video[0]])
+		}
+		if l == "" {
+			l = strconv.Itoa(i + 1)
+		}
+		if seen[l]++; seen[l] > 1 {
+			l += " " + strconv.Itoa(seen[l])
+		}
+		r = append(r, variant{l, i + 1, engine.OutputFile(x, i)})
+	}
+	return r
+}
+
+func qualityLabel(v models.VideoEnc) string {
+	if v.Name != "" {
+		return v.Name
+	}
+	switch v.Codec {
+	case "copy":
+		return "SOURCE"
+	case "hevc", "h265":
+		return "HEVC"
+	case "av1":
+		return "AV1"
+	}
+	h := 0
+	if _, b, ok := strings.Cut(strings.ToLower(v.Size), "x"); ok {
+		h, _ = strconv.Atoi(b)
+	}
+	switch {
+	case h == 0:
+		return ""
+	case h >= 2160:
+		return "4K"
+	case h >= 1080:
+		return "FHD"
+	case h >= 720:
+		return "HD"
+	}
+	return "SD"
+}
+
 // live implements Xtream style /live/user/pass/id.(ts|m3u8)
 func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 	cors(w)
 	file := r.PathValue("file")
 	ext := filepath.Ext(file)
-	id, err := strconv.ParseInt(strings.TrimSuffix(file, ext), 10, 64)
+	sid, sn, _ := strings.Cut(strings.TrimSuffix(file, ext), "_")
+	id, err := strconv.ParseInt(sid, 10, 64)
 	if err != nil {
 		http.NotFound(w, r)
 		return
@@ -385,6 +451,24 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	touchUser(u.ID, clientIP(r))
+	if sn != "" {
+		n, _ := strconv.Atoi(sn)
+		var x models.Stream
+		if ext != ".ts" || s.St.Get(models.KStream, id, &x) != nil || n < 1 || n > len(x.Outputs) || x.Outputs[n-1].Disabled || outKind(x.Outputs[n-1].Type) != "http" {
+			http.NotFound(w, r)
+			return
+		}
+		if !s.Mgr.Running(id) {
+			if !x.Enabled && !x.OnDemand {
+				http.Error(w, "stream offline", 404)
+				return
+			}
+			s.Mgr.Start(id)
+		}
+		engine.TouchDemand(id)
+		s.serveTS(w, r, id, s.Mgr.OutHub(id, n), x.Outputs[n-1].Buffer, func() { touchUser(u.ID, clientIP(r)) })
+		return
+	}
 	if ext == ".m3u8" {
 		if !s.ensure(id) {
 			http.Error(w, "stream offline", 404)
@@ -393,7 +477,7 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, fmt.Sprintf("/hls/%d/%s?t=%s", id, playlistOf(s.streamRoot(id)), s.signToken(id, 6*time.Hour)), http.StatusFound)
 		return
 	}
-	s.serveTS(w, r, id, func() { touchUser(u.ID, clientIP(r)) })
+	s.serveTS(w, r, id, nil, 0, func() { touchUser(u.ID, clientIP(r)) })
 }
 
 func (s *Server) tsRelay(w http.ResponseWriter, r *http.Request) {
@@ -403,17 +487,23 @@ func (s *Server) tsRelay(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", 403)
 		return
 	}
-	s.serveTS(w, r, id, nil)
+	s.serveTS(w, r, id, nil, 0, nil)
 }
 
 // serveTS fans the running encoder's MPEG-TS out to this viewer.
-func (s *Server) serveTS(w http.ResponseWriter, r *http.Request, id int64, tick func()) {
-	if !s.ensure(id) {
-		http.Error(w, "stream offline", 404)
-		return
+func (s *Server) serveTS(w http.ResponseWriter, r *http.Request, id int64, hub *engine.Hub, buf int, tick func()) {
+	if hub == nil {
+		if !s.ensure(id) {
+			http.Error(w, "stream offline", 404)
+			return
+		}
+		hub = s.Mgr.Hub(id)
 	}
-	hub := s.Mgr.Hub(id)
-	ch, cancel := hub.Subscribe()
+	n := 256
+	if buf > 0 {
+		n = buf / 64
+	}
+	ch, cancel := hub.SubscribeN(n)
 	defer cancel()
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -477,6 +567,14 @@ func (s *Server) getPHP(w http.ResponseWriter, r *http.Request) {
 	b.WriteString("#EXTM3U\n")
 	for _, x := range store.List[models.Stream](s.St, models.KStream) {
 		if (!x.Enabled && !x.OnDemand) || !s.userHas(u, x.ID) {
+			continue
+		}
+		if vs := s.variants(&x); ext == "ts" && len(vs) > 1 {
+			for _, v := range vs {
+				n := x.Name + " " + v.Label
+				fmt.Fprintf(&b, "#EXTINF:-1 tvg-id=%q tvg-name=%q tvg-logo=%q group-title=%q,%s\n%s/live/%s/%s/%d_%d.ts\n",
+					x.EPGID, n, x.Logo, cats[x.Category], n, base, u.Username, u.Password, x.ID, v.N)
+			}
 			continue
 		}
 		fmt.Fprintf(&b, "#EXTINF:-1 tvg-id=%q tvg-name=%q tvg-logo=%q group-title=%q,%s\n%s/live/%s/%s/%d.%s\n",
@@ -704,11 +802,21 @@ func (s *Server) exportM3U(w http.ResponseWriter, r *http.Request, _ *models.Acc
 	for _, c := range store.List[models.Category](s.St, models.KCategory) {
 		cats[c.ID] = c.Name
 	}
-	base := s.baseURL(r)
+	base, secure := s.baseURL(r), s.settings().SecurePlayback
 	var b strings.Builder
 	b.WriteString("#EXTM3U\n")
 	for _, x := range store.List[models.Stream](s.St, models.KStream) {
-		fmt.Fprintf(&b, "#EXTINF:-1 tvg-id=%q tvg-logo=%q group-title=%q,%s\n%s/hls/%d/?t=%s\n", x.EPGID, x.Logo, cats[x.Category], x.Name, base, x.ID, s.signToken(x.ID, 365*24*time.Hour))
+		q := ""
+		if secure {
+			q = "?t=" + s.signToken(x.ID, 365*24*time.Hour)
+		}
+		if vs := s.variants(&x); len(vs) > 1 {
+			for _, v := range vs {
+				fmt.Fprintf(&b, "#EXTINF:-1 tvg-id=%q tvg-logo=%q group-title=%q,%s %s\n%s/stream/%d/%d.ts%s\n", x.EPGID, x.Logo, cats[x.Category], x.Name, v.Label, base, x.ID, v.N, q)
+			}
+			continue
+		}
+		fmt.Fprintf(&b, "#EXTINF:-1 tvg-id=%q tvg-logo=%q group-title=%q,%s\n%s/hls/%d/%s\n", x.EPGID, x.Logo, cats[x.Category], x.Name, base, x.ID, q)
 	}
 	w.Header().Set("Content-Type", "audio/x-mpegurl")
 	w.Header().Set("Content-Disposition", "attachment; filename=mastergpu.m3u")
@@ -728,6 +836,103 @@ func (s *Server) drmManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/dash+xml")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Write(b)
+}
+
+func (s *Server) drmTrack(w http.ResponseWriter, r *http.Request) {
+	h, _, _ := net.SplitHostPort(r.RemoteAddr)
+	k := r.PathValue("kind")
+	if ip := net.ParseIP(h); s.DRM == nil || ip == nil || !ip.IsLoopback() || k != "video" && k != "audio" {
+		http.Error(w, "forbidden", 403)
+		return
+	}
+	s.DRM.ServeTrack(w, r, pathID(r), k)
+}
+
+func outKind(t string) string {
+	switch t {
+	case "hls", "hls_master":
+		return "hls"
+	}
+	return t
+}
+
+// streamOut serves Xaccel-style output links:
+// /stream/{id}/{file}.m3u8 (HLS output) and /stream/{id}/{file}.ts (HTTP output).
+// {file} is the output's filename or its 1-based number.
+func (s *Server) streamOut(w http.ResponseWriter, r *http.Request) {
+	cors(w)
+	id := pathID(r)
+	file := r.PathValue("file")
+	ext := filepath.Ext(file)
+	base := strings.TrimSuffix(file, ext)
+	kind := map[string]string{".m3u8": "hls", ".ts": "http"}[ext]
+	var x models.Stream
+	if kind == "" || s.St.Get(models.KStream, id, &x) != nil {
+		http.NotFound(w, r)
+		return
+	}
+	tok := r.URL.Query().Get("t")
+	if s.settings().SecurePlayback && !s.checkToken(id, tok) && s.Auth.Account(r) == nil {
+		http.Error(w, "forbidden", 403)
+		return
+	}
+	oi := -1
+	for i, o := range x.Outputs {
+		if !o.Disabled && outKind(o.Type) == kind && engine.OutputFile(&x, i) == base {
+			oi = i
+			break
+		}
+	}
+	if n, err := strconv.Atoi(base); oi < 0 && err == nil && n >= 1 && n <= len(x.Outputs) && !x.Outputs[n-1].Disabled && outKind(x.Outputs[n-1].Type) == kind {
+		oi = n - 1
+	}
+	if oi < 0 {
+		http.Error(w, "no such output", 404)
+		return
+	}
+	if kind == "http" {
+		if !s.Mgr.Running(id) {
+			if !x.Enabled && !x.OnDemand {
+				http.Error(w, "stream offline", 404)
+				return
+			}
+			s.Mgr.Start(id)
+		}
+		engine.TouchDemand(id)
+		s.serveTS(w, r, id, s.Mgr.OutHub(id, oi+1), x.Outputs[oi].Buffer, nil)
+		return
+	}
+	if !s.ensure(id) {
+		http.Error(w, "stream offline", 404)
+		return
+	}
+	root, dir := s.streamRoot(id), engine.OutputDir(&x, oi)
+	p, pre := dir+".m3u8", fmt.Sprintf("/hls/%d/", id)
+	var b []byte
+	for i := 0; i < 40; i++ {
+		var err error
+		if b, err = os.ReadFile(filepath.Join(root, p)); err == nil {
+			break
+		}
+		if b, err = os.ReadFile(filepath.Join(root, dir, "index.m3u8")); err == nil {
+			pre += dir + "/"
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if b == nil {
+		http.Error(w, "not ready", 404)
+		return
+	}
+	engine.TouchViewer(id, viewerKey(r))
+	engine.TouchDemand(id)
+	b = prefixPlaylist(b, pre)
+	if tok != "" {
+		b = rewritePlaylist(b, "t="+tok)
+	}
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Write(b)
 }

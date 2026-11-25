@@ -32,6 +32,8 @@ type Service struct {
 
 	mu   sync.Mutex
 	srcs map[int64]source
+	mc   map[int64]mcache
+	anch map[int64]anchorT
 }
 
 type source struct {
@@ -206,8 +208,24 @@ func (d *Service) Prep(ctx context.Context, s *models.Stream, input, root string
 		d.srcs = map[int64]source{}
 	}
 	d.srcs[s.ID] = source{url: final, stream: *s}
+	delete(d.anch, s.ID)
+	delete(d.mc, s.ID)
 	d.mu.Unlock()
 
+	t := &s.Transcode
+	sub := strings.ToLower(strings.TrimSpace(s.DRM.Subtitles))
+	wantSubs := sub != "" && sub != "none" && info.HasText
+	if !wantSubs && info.Has("video") {
+		// segment fetcher: video and audio as separate fMP4 inputs on one timeline
+		o := &engine.BuildOpts{Input: fmt.Sprintf("%s/drm/%d/track/video", d.LocalBase, s.ID), InputKeys: []string{vkey}, CopyTS: true}
+		if info.Has("audio") {
+			o.Inputs2 = []string{fmt.Sprintf("%s/drm/%d/track/audio", d.LocalBase, s.ID)}
+			o.InputKeys = append(o.InputKeys, firstNonEmpty(akey, vkey))
+			o.AudioInput = 1
+		}
+		d.St.Log("stream", s.ID, "info", fmt.Sprintf("DRM ready: %d key(s), kids=%s, live segment fetcher", len(keys), strings.Join(info.KIDs(), ",")))
+		return o, nil
+	}
 	local := fmt.Sprintf("%s/drm/%d/manifest.mpd", d.LocalBase, s.ID)
 	o := &engine.BuildOpts{Input: local, InputKeys: []string{vkey}, CENC: true}
 	if akey != "" && akey != vkey {
@@ -221,8 +239,7 @@ func (d *Service) Prep(ctx context.Context, s *models.Stream, input, root string
 			o.Proxy = r.Addr
 		}
 	}
-	t := &s.Transcode
-	if sub := strings.ToLower(strings.TrimSpace(s.DRM.Subtitles)); sub != "" && sub != "none" && info.HasText && t.SubMode == "" {
+	if wantSubs && t.SubMode == "" {
 		t.SubMode = "webvtt"
 		if s.DRM.SubBurn {
 			t.SubMode = "burn"
@@ -356,6 +373,16 @@ func ParseMPD(b []byte) Info {
 		in.PSSH = append(in.PSSH, strings.TrimSpace(string(m[1])))
 	}
 	return in
+}
+
+// Has reports whether the manifest has an adaptation set of the given kind.
+func (in Info) Has(kind string) bool {
+	for _, s := range in.Sets {
+		if s.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // KID returns the first KID of the given kind.

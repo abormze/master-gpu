@@ -177,6 +177,8 @@ type Output struct {
 	Port     int    `json:"port"`
 	Passwd   string `json:"passphrase"`
 	Latency  int    `json:"latency"`
+	File     string `json:"filename"`
+	Buffer   int    `json:"buffer"`
 	Disabled bool   `json:"disabled"`
 }
 

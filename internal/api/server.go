@@ -251,6 +251,12 @@ func (s *Server) routes() {
 		ok(w, nil)
 		go func() { time.Sleep(500 * time.Millisecond); s.Updater.Restart() }()
 	}))
+	m.HandleFunc("POST /api/system/reboot", s.admin(func(w http.ResponseWriter, r *http.Request, _ *models.Account) {
+		ok(w, nil)
+		s.reboot()
+	}))
+	m.HandleFunc("GET /api/servers/stats", s.authed(s.serverStats))
+	m.HandleFunc("POST /api/servers/{id}/{action}", s.admin(s.serverAction))
 	m.HandleFunc("GET /api/system/diag", s.admin(s.diag))
 	m.HandleFunc("POST /api/system/bench", s.admin(s.bench))
 	m.HandleFunc("POST /api/system/telegram-test", s.admin(func(w http.ResponseWriter, r *http.Request, _ *models.Account) {
@@ -267,8 +273,10 @@ func (s *Server) routes() {
 	// playback
 	m.HandleFunc("GET /hls/{id}/{path...}", s.hls)
 	m.HandleFunc("GET /drm/{id}/manifest.mpd", s.drmManifest)
+	m.HandleFunc("GET /drm/{id}/track/{kind}", s.drmTrack)
 	m.HandleFunc("GET /live/{user}/{pass}/{file}", s.live)
 	m.HandleFunc("GET /ts/{id}", s.tsRelay)
+	m.HandleFunc("GET /stream/{id}/{file}", s.streamOut)
 	m.HandleFunc("GET /get.php", s.getPHP)
 	m.HandleFunc("GET /player_api.php", s.playerAPI)
 	m.HandleFunc("GET /lb/{id}/{path...}", s.lbRedirect)
@@ -560,7 +568,7 @@ func (s *Server) statuses() []streamRow {
 			var pr models.Profile
 			if s.St.Get(models.KProfile, x.ProfileID, &pr) == nil {
 				x.Transcode = engine.MergeProfile(pr.Transcode, x.Transcode)
-				if pr.GPU != nil && *pr.GPU != -3 && x.GPU == -2 {
+				if pr.GPU != nil && *pr.GPU != -3 && (x.GPU == -2 || x.GPU == -3) {
 					x.GPU = *pr.GPU
 				}
 			}

@@ -53,6 +53,7 @@ const IC = {
   edit: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>', del: '<path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14"/>', copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>',
   plus: '<path d="M12 5v14M5 12h14"/>', eye: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>', menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>', out: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  power: '<path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/>',
   up: '<path d="M12 19V5M5 12l7-7 7 7"/>', down: '<path d="M12 5v14M5 12l7 7 7-7"/>', cpu: '<rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>', ram: '<rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 11v2M10 11v2M14 11v2M18 11v2"/>', net: '<path d="M7 17 17 7M7 7h10v10"/>', eyes: '<circle cx="12" cy="12" r="3"/><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/>'
 };
 const ico = n => `<svg class="i" viewBox="0 0 24 24">${IC[n] || ""}</svg>`;
@@ -540,6 +541,37 @@ function gpuCard(c) {
 
 /* ---------- views ---------- */
 const VIEWS = {};
+VIEWS.server = async (el = $("#page")) => {
+  await loadRef("server");
+  el.innerHTML = `<div class="tbar"><input class="in search" placeholder="${L("Search…|بحث…")}" id="q"><span class="sp"></span><button class="btn p" id="add">${ico("plus")} ${L("Add server|إضافة سيرفر")}</button></div>
+  <div class="card tw"><table><thead><tr><th>ID</th><th>${L("Name|الاسم")}</th><th>${L("Uptime|مدة التشغيل")}</th><th>${L("Upload|رفع")}</th><th>${L("Download|تنزيل")}</th><th>${L("Streams|القنوات")}</th><th>${L("Connections|الاتصالات")}</th><th>CPU / RAM</th><th>${L("License status|الترخيص")}</th><th>${L("Settings|الإعدادات")}</th></tr></thead><tbody id="tb"><tr><td colspan="99" class="empty">…</td></tr></tbody></table></div>`;
+  let rows = [];
+  const adm = S.me.role === "admin", btn = (a, id, ic, t, d) => `<button class="btn i s${d ? " d" : ""}" data-a="${a}" data-id="${id}" title="${t}">${ico(ic)}</button>`;
+  const draw = () => {
+    const q = $("#q").value.toLowerCase();
+    $("#tb").innerHTML = rows.filter(x => !q || JSON.stringify(x).toLowerCase().includes(q)).map(x => `<tr><td class="mut">${x.master ? 1 : x.id + 1}</td>
+      <td><span class="chip ${x.master ? "pri" : ""}">${esc(x.name)}</span>${x.host && !x.master ? `<div class="mut ltr" style="font-size:12px">${esc(x.host)}</div>` : ""}</td>
+      <td class="ltr">${x.online ? fmtDur(x.uptime) : "—"}</td><td class="ltr">${x.online ? fmtBits(x.up) : "—"}</td><td class="ltr">${x.online ? fmtBits(x.down) : "—"}</td>
+      <td>${x.online ? `${x.streams} / ${x.total}` : "—"}</td><td>${x.online ? x.connections : "—"}</td><td class="ltr">${x.online ? `${x.cpu.toFixed(0)}% · ${x.mem.toFixed(0)}%` : "—"}</td>
+      <td>${x.disabled ? '<span class="chip">disabled</span>' : x.online ? `<span class="chip ok">Active${x.version ? " · v" + esc(x.version) : ""}</span>` : `<span class="chip err" title="${esc(x.error || "")}">Offline</span>`}</td>
+      <td><div class="acts">${btn("stats", x.id, "dash", "stats")}${btn("logs", x.id, "log", "logs")}${btn("edit", x.id, "set", "settings")}${adm ? btn("restart", x.id, "re", L("Restart panel|إعادة تشغيل اللوحة")) + btn("reboot", x.id, "power", L("Reboot server|إعادة تشغيل السيرفر"), 1) : ""}${adm && !x.master ? btn("del", x.id, "del", "delete", 1) : ""}</div></td></tr>`).join("");
+  };
+  const load = async () => { if (!el.isConnected || route() !== "server") return clearInterval(t); try { rows = await api("servers/stats"); draw(); } catch { } };
+  const t = setInterval(load, 5000);
+  await load(); $("#q").oninput = draw;
+  const reload = () => VIEWS.server(el);
+  $("#add").onclick = () => editModal("server", null, () => { clearInterval(t); reload(); });
+  $("#tb").onclick = async e => {
+    const b = e.target.closest("[data-a]"); if (!b) return;
+    const id = +b.dataset.id, a = b.dataset.a, x = rows.find(r => r.id === id), master = id === 0;
+    if (a === "stats") location.hash = master ? "#/dash" : "#/server";
+    else if (a === "logs") location.hash = "#/logs";
+    else if (a === "edit") { if (master) location.hash = "#/settings"; else editModal("server", S.cache.server?.find(s => s.id === id) || await api("server/" + id), () => { clearInterval(t); reload(); }); }
+    else if (a === "restart" && confirm(L(`Restart the panel on ${x.name}? Streams restart automatically.|إعادة تشغيل اللوحة على ${x.name}؟ القنوات بترجع تشتغل تلقائياً.`))) await tryDo(() => api(`servers/${id}/restart`, { method: "POST" }), L("Restarting…|جاري إعادة التشغيل…"));
+    else if (a === "reboot" && confirm(L(`Reboot the whole server ${x.name}? All streams stop until it boots again.|إعادة تشغيل السيرفر ${x.name} بالكامل؟ كل القنوات بتوقف لحد ما يرجع يشتغل.`))) await tryDo(() => api(`servers/${id}/reboot`, { method: "POST" }), L("Rebooting…|جاري إعادة تشغيل السيرفر…"));
+    else if (a === "del" && confirm(L("Delete this server?|حذف هذا السيرفر؟"))) { await tryDo(() => api("server/" + id, { method: "DELETE" }), L("Deleted|تم الحذف")); clearInterval(t); reload(); }
+  };
+};
 VIEWS.dash = el => {
   const tile = (i, id, l) => `<div class="card tile"><div class="ic">${ico(i)}</div><div><div class="v" id="${id}">—</div><div class="l">${L(l)}</div></div></div>`;
   el.innerHTML = `<div class="grid g4">${tile("stream", "t_run", "Running streams|قنوات شغالة")}${tile("eyes", "t_view", "Viewers|المشاهدين")}${tile("cpu", "t_cpu", "CPU")}${tile("ram", "t_ram", "RAM")}${tile("net", "t_net", "Network out|الخروج")}${tile("gpu", "t_gpu", "GPUs|الكروت")}</div>

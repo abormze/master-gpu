@@ -529,15 +529,15 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	served := map[string]bool{}
 	httpN := 0
 	// re-send encoder SPS/PPS on keyframes so TS viewers can join mid-stream;
-	// copied streams get them from mp4toannexb; video streams are mapped first so index == stream index
+	// copied streams get them from mp4toannexb. tee re-indexes streams per slave,
+	// so match by type: an index could hit the audio stream and corrupt AAC.
 	dx := func(vs []int) string {
-		r := ""
 		for _, v := range vs {
 			if v < len(venc) && !copyMode && venc[v].Codec != "copy" {
-				r += fmt.Sprintf(":bsfs/%d=dump_extra", v)
+				return ":bsfs/v=dump_extra"
 			}
 		}
-		return r
+		return ""
 	}
 	for oi, out := range s.Outputs {
 		if out.Disabled {
