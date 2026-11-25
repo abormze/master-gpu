@@ -3,6 +3,8 @@ package engine
 import (
 	"io"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 const gopMax = 24 << 20
@@ -12,7 +14,8 @@ const gopMax = 24 << 20
 // since the last video keyframe so new viewers start instantly and cleanly.
 type Hub struct {
 	mu     sync.Mutex
-	subs   map[chan []byte]struct{}
+	subs   map[chan []byte]*HubConn
+	bytes  atomic.Int64
 	pat    []byte
 	pmt    []byte
 	pmtPID int
@@ -21,15 +24,42 @@ type Hub struct {
 	gopOK  bool
 }
 
-func NewHub() *Hub { return &Hub{subs: map[chan []byte]struct{}{}, pmtPID: -1, vidPID: -1} }
+func NewHub() *Hub { return &Hub{subs: map[chan []byte]*HubConn{}, pmtPID: -1, vidPID: -1} }
+
+// HubConn describes one viewer connected to a hub.
+type HubConn struct {
+	Addr  string
+	Proto string
+	Since time.Time
+}
+
+// Conns lists the viewers currently attached.
+func (h *Hub) Conns() []HubConn {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	r := make([]HubConn, 0, len(h.subs))
+	for _, c := range h.subs {
+		if c != nil {
+			r = append(r, *c)
+		}
+	}
+	return r
+}
 
 func (h *Hub) Subscribe() (chan []byte, func()) { return h.SubscribeN(256) }
 
 // SubscribeN subscribes with a buffer of n chunks (~64KB each).
-func (h *Hub) SubscribeN(n int) (chan []byte, func()) {
+func (h *Hub) SubscribeN(n int) (chan []byte, func()) { return h.SubscribeAs(n, "", "") }
+
+// SubscribeAs subscribes and records the viewer's address for the stream details.
+func (h *Hub) SubscribeAs(n int, addr, proto string) (chan []byte, func()) {
 	c := make(chan []byte, max(n, 8))
 	h.mu.Lock()
-	h.subs[c] = struct{}{}
+	var hc *HubConn
+	if addr != "" {
+		hc = &HubConn{Addr: addr, Proto: proto, Since: time.Now()}
+	}
+	h.subs[c] = hc
 	if h.gopOK && len(h.gop) > 0 {
 		c <- append([]byte(nil), h.gop...)
 	}
@@ -44,6 +74,9 @@ func (h *Hub) SubscribeN(n int) (chan []byte, func()) {
 	}
 }
 
+// Bytes is the total MPEG-TS volume pumped through the hub.
+func (h *Hub) Bytes() int64 { return h.bytes.Load() }
+
 func (h *Hub) Count() int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -55,6 +88,7 @@ func (h *Hub) Pump(r io.Reader) {
 	for {
 		n, err := io.ReadFull(r, buf)
 		if n > 0 {
+			h.bytes.Add(int64(n))
 			chunk := make([]byte, n)
 			copy(chunk, buf[:n])
 			h.mu.Lock()

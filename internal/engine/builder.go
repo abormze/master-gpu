@@ -90,7 +90,7 @@ func audioEnc(c string) string {
 }
 
 func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
-	a := []string{"-hide_banner", "-nostdin", "-loglevel", "warning", "-progress", "pipe:1", "-stats_period", "2"}
+	a := []string{"-hide_banner", "-nostdin", "-loglevel", "level+info", "-nostats", "-progress", "pipe:1", "-stats_period", "2"}
 	if o.CopyTS {
 		a = append(a, "-copyts")
 	}

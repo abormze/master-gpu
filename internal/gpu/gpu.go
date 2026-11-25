@@ -64,6 +64,42 @@ type Monitor struct {
 	info Info
 	smi  string
 	fake int
+	pids map[int]ProcUse
+}
+
+// ProcUse is one process's share of a card, from nvidia-smi pmon.
+type ProcUse struct {
+	GPU               int
+	SM, Enc, Dec, Mem float64 // %
+	FB                float64 // MiB
+}
+
+// Proc returns the GPU usage of pid, if it runs on a card.
+func (m *Monitor) Proc(pid int) (ProcUse, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	u, ok := m.pids[pid]
+	return u, ok
+}
+
+func (m *Monitor) pollPids(ctx context.Context) map[int]ProcUse {
+	out, err := exec.CommandContext(ctx, m.smi, "pmon", "-c", "1", "-s", "um").Output()
+	if err != nil {
+		return nil
+	}
+	r := map[int]ProcUse{}
+	for _, l := range strings.Split(string(out), "\n") {
+		f := strings.Fields(l)
+		if len(f) < 8 || strings.HasPrefix(f[0], "#") {
+			continue
+		}
+		pid := atoi(f[1])
+		if pid <= 0 {
+			continue
+		}
+		r[pid] = ProcUse{GPU: atoi(f[0]), SM: num(f[3]), Mem: num(f[4]), Enc: num(f[5]), Dec: num(f[6]), FB: num(f[7])}
+	}
+	return r
 }
 
 func New() *Monitor {
@@ -150,6 +186,7 @@ func (m *Monitor) poll() {
 			}
 		}
 	}
+	pids := m.pollPids(ctx)
 	info.CUDA = cudaVersion(ctx, m.smi)
 	info.Patched = Patched()
 	for i := range info.Cards {
@@ -158,6 +195,7 @@ func (m *Monitor) poll() {
 		}
 	}
 	m.mu.Lock()
+	m.pids = pids
 	m.info = info
 	m.mu.Unlock()
 }

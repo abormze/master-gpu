@@ -619,6 +619,40 @@ function benchModal() {
     b.disabled = false;
   };
 }
+const XI = {
+  stop: `<svg viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="1.5"/></svg>`,
+  play: `<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="7"/><path d="M6.3 4.8v6.4L11.2 8z" fill="#fff"/></svg>`,
+  gear: `<svg viewBox="0 0 24 24"><path d="M19.4 13a7.7 7.7 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1l-.4-2.7h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L4.6 11a7.7 7.7 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.7h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>`,
+  tree: `<svg viewBox="0 0 24 24"><path d="M9 2h6v6h-2v3h7v5h2v6h-6v-6h2v-3H8v3h2v6H4v-6h2v-5h7V8h-2V2z" transform="translate(0 0)"/></svg>`,
+  file: `<svg viewBox="0 0 24 24"><path d="M6 2h8l6 6v14H6zM13 3.5V9h5.5z"/></svg>`,
+  clone: `<svg viewBox="0 0 24 24"><path d="M8 3h11a2 2 0 0 1 2 2v11h-2V5H8zM4 7h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/></svg>`,
+  x: `<svg viewBox="0 0 24 24"><path d="M5 3.6 12 10.6l7-7L20.4 5l-7 7 7 7-1.4 1.4-7-7-7 7L3.6 19l7-7-7-7z"/></svg>`,
+  cp: `<svg viewBox="0 0 24 24"><path d="M8 3h11a2 2 0 0 1 2 2v11h-2V5H8zM4 7h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/></svg>`
+};
+const hms = s => { s = Math.max(0, +s || 0); const h = Math.floor(s / 3600), p = n => String(n).padStart(2, "0"); return `${p(h)}:${p(Math.floor(s % 3600 / 60))}:${p(Math.floor(s % 60))}`; };
+const copyText = t => navigator.clipboard?.writeText(t).then(() => toast(L("Copied|تم النسخ")), () => toast(t)) ?? toast(t);
+function hwTags(r) {
+  if (r.mode === "copy") return `<span class="xb hw">COPY</span>`;
+  if (r.mode === "drm") return `<span class="xb hw">DRM</span>`;
+  if (r.gpu >= 0) return `<span class="xb hw">NVENC</span> <span class="xb hw">GPU${r.gpu}</span>`;
+  return r.state === "running" ? `<span class="xb hw">CPU</span>` : `<span class="xb hw">${esc((r.mode || "").toUpperCase())}</span>`;
+}
+function fmtDetails(d) {
+  const pad = (v, n) => String(v).padStart(n, "\u00a0"), pct = v => pad((+v || 0).toFixed(1), 5) + "%";
+  const two = (l, r) => `<div class="x2"><div>${l.map(x => `<div class="xl">${x}</div>`).join("")}</div><div>${r.map(x => `<div class="xl">${x}</div>`).join("")}</div></div>`;
+  const url = (lbl, u, extra = "") => `<div class="xu"><span class="el" title="${esc(u)}">${esc(lbl + u)}</span><button class="xcp" data-cp="${esc(u)}" title="Copy">${XI.cp}</button>${extra}</div>`;
+  const usage = two(
+    [`CPU Usage: ${pct(d.cpu_percent)}`, `System Memory Usage: ${Math.round((d.mem_rss || 0) / 1048576)} MiB`],
+    "gpu_enc" in d ? [`GPU${d.gpu} Usage: DEC ${pct(d.gpu_dec)} SM ${pct(d.gpu_sm)} ENC ${pct(d.gpu_enc)}`, `Graphics Memory Usage: ${Math.round(d.gpu_mem || 0)} MiB`] : []);
+  const urls = two(
+    (d.input_urls || []).map((u, i) => url(`Input #${i}: `, u, i === d.input_index && d.state === "running" ? `<span class="ok">✔</span>` : "")),
+    (d.outputs || []).map((o, i) => url(`Output #${i}: `, o.url, o.connections > 0 ? `<b class="ok">${o.connections} connections</b>` : "")));
+  const si = d.streaminfo || {};
+  const info = two(["<b>Input</b>", ...(si.input || []).map(esc)], ["<b>Output</b>", ...(si.output || []).map(esc)]);
+  const cs = d.connections || [];
+  const conns = cs.length ? `<table class="xct"><thead><tr><th>#</th><th>Protocol</th><th>Address</th><th>Duration</th></tr></thead><tbody>${cs.sort((a, b) => b.duration - a.duration).map((c, i) => `<tr><td>${i}</td><td>${esc(c.protocol.toUpperCase())}</td><td>${esc(c.address)}</td><td>${hms(c.duration)}</td></tr>`).join("")}</tbody></table>` : `<div class="mut">No connections</div>`;
+  return [usage, urls, info, conns].join("<hr>");
+}
 VIEWS.streams = async el => {
   await Promise.all([loadRef("category", 1), loadRef("profile")]);
   const cats = S.cache.category.filter(c => c.type !== "movie" && c.type !== "series");
@@ -626,18 +660,25 @@ VIEWS.streams = async el => {
    <select class="in" id="fs" style="width:auto"><option value="">${L("All states|كل الحالات")}</option>${["running", "error", "stopped", "starting", "waiting"].map(s => `<option>${s}</option>`).join("")}</select><span class="sp"></span>
    <span id="selb" style="display:none" class="acts"><button class="btn s" data-b="start">${ico("play")}</button><button class="btn s" data-b="stop">${ico("stop")}</button><button class="btn s" data-b="restart">${ico("re")}</button><button class="btn s d" data-b="delete">${ico("del")}</button></span>
    <button class="btn" id="imp">${ico("down")} M3U</button><a class="btn" href="/api/export/m3u" download="mastergpu.m3u">${ico("up")} M3U</a><button class="btn p" id="add">${ico("plus")} ${L("Add stream|إضافة قناة")}</button></div>
-   <div class="card tw"><table><thead><tr><th><input type="checkbox" id="all"></th><th>ID</th><th></th><th>${L("Name|الاسم")}</th><th>${L("State|الحالة")}</th><th>${L("Mode|الوضع")}</th><th>${L("Source|المصدر")}</th><th>GPU</th><th>FPS / ${L("Speed|سرعة")}</th><th>${L("Bitrate|البت ريت")}</th><th>${L("Viewers|مشاهدين")}</th><th>${L("Uptime|مدة")}</th><th></th></tr></thead><tbody id="tb"></tbody></table></div>`;
-  const sel = new Set(), tstamp = Math.floor(Date.now() / 60000);
+   <div class="card tw"><table class="xs"><thead><tr><th><input type="checkbox" id="all"></th><th>ID</th><th>NAME</th><th>SERVER</th><th>HWACCEL</th><th>BITRATE</th><th>QUALITY</th><th>FPS</th><th>TIME</th><th>SPEED</th><th>CONNECTIONS</th><th>SETTINGS</th></tr></thead><tbody id="tb"></tbody></table></div>`;
+  const sel = new Set(), open = new Map(), det = {};
+  const poll = async id => {
+    try { det[id] = fmtDetails(await api(`stream/${id}/stats`)); } catch (e) { det[id] = esc(e.message); }
+    const d = $("#xd" + id); if (d) d.innerHTML = det[id];
+  };
+  const toggle = id => {
+    if (open.has(id)) { clearInterval(open.get(id)); open.delete(id); delete det[id]; draw(); return; }
+    open.set(id, setInterval(() => { if (!$("#tb")) { clearInterval(open.get(id)); open.delete(id); return; } poll(id); }, 1000)); draw(); poll(id);
+  };
   const draw = () => {
     if (!$("#tb")) return; const q = $("#q").value.toLowerCase(), fc = $("#fc").value, fs = $("#fs").value;
     const rows = S.rows.filter(r => (!q || r.name.toLowerCase().includes(q) || String(r.id) === q) && (!fc || r.category == fc) && (!fs || r.state === fs));
-    $("#tb").innerHTML = rows.map(r => `<tr><td><input type="checkbox" data-s="${r.id}"${sel.has(r.id) ? " checked" : ""}></td><td class="mut">${r.id}</td><td>${r.state === "running" ? `<img class="thumb" loading="lazy" src="/api/stream/${r.id}/thumb.jpg?${tstamp}" onerror="this.style.visibility='hidden'">` : `<div class="thumb"></div>`}</td>
-     <td><span class="nb">${esc(r.name)}</span><div class="mut" style="font-size:11px;margin-top:3px">${r.profile ? `<span class="tg">${esc(refName("profile", r.profile))}</span> ` : ""}${esc(refName("category", r.category))}${r.on_demand ? " · on-demand" : ""}</div></td>
-     <td><span class="dot ${r.state}"></span>${esc(r.state)}${r.black ? ' <span class="chip err">black</span>' : ""}${r.silent ? ' <span class="chip warn">silent</span>' : ""}${r.last_error && r.state !== "running" ? `<div class="mut" style="font-size:11px;max-width:220px;white-space:normal">${esc(r.last_error).slice(0, 120)}</div>` : ""}</td>
-     <td><span class="chip ${r.mode === "gpu" ? "pri" : r.mode === "drm" ? "warn" : ""}">${esc(r.mode)}</span></td><td class="mut">${r.state === "running" ? `#${r.input + 1} · ${esc(r.video || "")}` : ""}</td>
-     <td>${r.gpu >= 0 ? r.gpu : r.state === "running" ? "CPU" : ""}</td><td>${r.state === "running" ? `${r.fps.toFixed(0)} · ${r.speed.toFixed(2)}x` : ""}</td><td>${r.bitrate ? fmtBits(r.bitrate * 1000) : ""}</td><td>${r.viewers || ""}</td><td>${r.state === "running" ? fmtDur(r.uptime) : ""}</td>
-     <td><div class="acts">${r.state === "running" || r.state === "starting" || r.state === "restarting" ? `<button class="btn i s" data-a="stop" data-id="${r.id}" title="stop">${ico("stop")}</button><button class="btn i s" data-a="restart" data-id="${r.id}">${ico("re")}</button>` : `<button class="btn i s" data-a="start" data-id="${r.id}" title="start">${ico("play")}</button>`}
-     <button class="btn i s" data-a="play" data-id="${r.id}" title="preview">${ico("eye")}</button><button class="btn i s" data-a="log" data-id="${r.id}" title="log">${ico("log")}</button><button class="btn i s" data-a="edit" data-id="${r.id}">${ico("edit")}</button><button class="btn i s" data-a="clone" data-id="${r.id}">${ico("copy")}</button><button class="btn i s d" data-a="del" data-id="${r.id}">${ico("del")}</button></div></td></tr>`).join("") || `<tr><td colspan="99" class="empty">${L("No streams yet — add one or import an M3U|لا توجد قنوات — أضف قناة أو استورد M3U")}</td></tr>`;
+    $("#tb").innerHTML = rows.map(r => { const on = r.state === "running", busy = on || r.state === "starting" || r.state === "restarting";
+      return `<tr class="xr${open.has(r.id) ? " shown" : ""}" data-row="${r.id}"><td><input type="checkbox" data-s="${r.id}"${sel.has(r.id) ? " checked" : ""}></td><td>${r.id}</td>
+     <td><span class="xb nm ${r.state}" title="${esc(r.state + (r.last_error && !on ? " — " + r.last_error.slice(0, 160) : ""))}">${esc(r.name)}</span>${r.black ? ' <span class="xb err">BLACK</span>' : ""}${r.silent ? ' <span class="xb warn">SILENT</span>' : ""}</td>
+     <td><span class="xb sv">${esc(r.server_name || "Master")}</span></td>
+     <td>${hwTags(r)}</td><td>${on && r.bitrate ? r.bitrate.toFixed(1) + "kbits/s" : ""}</td><td>${on ? (r.quality || -1).toFixed(1) : ""}</td><td>${on ? r.fps.toFixed(0) : ""}</td><td>${on ? hms(r.uptime) : ""}</td><td>${on ? +r.speed.toFixed(2) + "x" : ""}</td><td>${r.viewers || 0}</td>
+     <td><div class="xa">${busy ? `<button class="xi red" data-a="stop" data-id="${r.id}" title="Stop">${XI.stop}</button><button class="xi" data-a="restart" data-id="${r.id}" title="Restart">${XI.play}</button>` : `<button class="xi" data-a="start" data-id="${r.id}" title="Start">${XI.play}</button>`}<button class="xi" data-a="edit" data-id="${r.id}" title="Settings">${XI.gear}</button><button class="xi" data-a="play" data-id="${r.id}" title="Preview">${XI.tree}</button><button class="xi" data-a="log" data-id="${r.id}" title="Log">${XI.file}</button><button class="xi" data-a="clone" data-id="${r.id}" title="Clone">${XI.clone}</button><button class="xi red" data-a="del" data-id="${r.id}" title="Delete">${XI.x}</button></div></td></tr>${open.has(r.id) ? `<tr class="xc" data-child="${r.id}"><td colspan="12"><div class="xd" id="xd${r.id}">${det[r.id] || "…"}</div></td></tr>` : ""}`; }).join("") || `<tr><td colspan="99" class="empty">${L("No streams yet — add one or import an M3U|لا توجد قنوات — أضف قناة أو استورد M3U")}</td></tr>`;
     $("#selb").style.display = sel.size ? "flex" : "none";
   };
   const refresh = async () => { S.rows = await api("status"); draw(); };
@@ -649,7 +690,10 @@ VIEWS.streams = async el => {
   $("#selb").onclick = async e => { const b = e.target.closest("[data-b]"); if (!b) return; if (b.dataset.b === "delete" && !confirm(L("Delete selected streams?|حذف القنوات المحددة؟"))) return; await tryDo(() => api("streams/bulk", { method: "POST", body: { ids: [...sel], action: b.dataset.b } }), "OK"); sel.clear(); refresh(); };
   $("#tb").onclick = async e => {
     const c = e.target.closest("[data-s]"); if (c) { c.checked ? sel.add(+c.dataset.s) : sel.delete(+c.dataset.s); $("#selb").style.display = sel.size ? "flex" : "none"; return; }
-    const b = e.target.closest("[data-a]"); if (!b) return; const id = +b.dataset.id, a = b.dataset.a;
+    const cp = e.target.closest("[data-cp]"); if (cp) { copyText(cp.dataset.cp); return; }
+    const b = e.target.closest("[data-a]");
+    if (!b) { const tr = e.target.closest("tr[data-row]"); if (tr && !e.target.closest("a,button,input")) toggle(+tr.dataset.row); return; }
+    const id = +b.dataset.id, a = b.dataset.a;
     if (["start", "stop", "restart"].includes(a)) { b.disabled = true; await tryDo(() => api(`stream/${id}/${a}`, { method: "POST" })).catch(() => { }); setTimeout(refresh, 600); }
     if (a === "edit" || a === "clone") { const s = await api("stream/" + id); if (a === "clone") { delete s.id; s.name += " copy"; } editModal("stream", s, refresh); }
     if (a === "del" && confirm(L("Delete this stream?|حذف هذه القناة؟"))) { await tryDo(() => api("stream/" + id, { method: "DELETE" }), L("Deleted|تم الحذف")); refresh(); }

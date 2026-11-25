@@ -60,6 +60,7 @@ type Status struct {
 	Audio     string    `json:"audio"`
 	Black     bool      `json:"black"`
 	Silent    bool      `json:"silent"`
+	Quality   float64   `json:"quality"`
 }
 
 type proc struct {
@@ -75,7 +76,10 @@ type proc struct {
 	ticks    uint64
 	tickT    time.Time
 	done     chan struct{}
-	manual   int // forced input index (-1 none)
+	manual   int      // forced input index (-1 none)
+	infoIn   []string // ffmpeg's input/output stream dump
+	infoOut  []string
+	dumpOut  bool
 }
 
 type Hooks struct {
@@ -161,6 +165,9 @@ func (m *Manager) Status(id int64) Status {
 		s.Uptime = time.Now().Unix() - s.Since
 	}
 	s.Viewers = p.hub.Count() + viewerCount(id)
+	for _, h := range p.ohubs {
+		s.Viewers += h.Count()
+	}
 	return s
 }
 
@@ -540,6 +547,15 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 		sc.Buffer(make([]byte, 64*1024), 1024*1024)
 		for sc.Scan() {
 			l := sc.Text()
+			if i := strings.Index(l, "[info] "); i >= 0 {
+				p.mu.Lock()
+				dumpLine(p, l[i+7:])
+				p.mu.Unlock()
+				continue
+			}
+			for _, t := range []string{"[warning] ", "[error] ", "[fatal] ", "[panic] "} {
+				l = strings.Replace(l, t, "", 1)
+			}
 			tmu.Lock()
 			tail = append(tail, l)
 			if len(tail) > 30 {
@@ -578,7 +594,7 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 	go func() {
 		sc := bufio.NewScanner(stdout)
 		running := false
-		var wrote uint64
+		var wrote int64
 		var wroteAt time.Time
 		// ffmpeg's speed/fps are averages since start; show the last ~30s instead
 		type sample struct {
@@ -618,6 +634,8 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 				p.st.Drops, _ = strconv.ParseInt(v, 10, 64)
 			case "dup_frames":
 				p.st.Dups, _ = strconv.ParseInt(v, 10, 64)
+			case "stream_0_0_q":
+				p.st.Quality, _ = strconv.ParseFloat(v, 64)
 			case "speed":
 				if len(win) < 2 {
 					p.st.Speed, _ = strconv.ParseFloat(strings.TrimSuffix(v, "x"), 64)
@@ -636,7 +654,18 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 						}
 					}
 				}
-				if w := sysmon.ProcWritten(cmd.Process.Pid); w > 0 {
+				// encoded output rate: each HTTP variant once, not every tee/HLS copy
+				var w int64
+				for _, h := range ohubs {
+					w += h.Bytes()
+				}
+				if w == 0 {
+					w = p.hub.Bytes()
+				}
+				if w == 0 {
+					w = int64(sysmon.ProcWritten(cmd.Process.Pid))
+				}
+				if w > 0 {
 					if !wroteAt.IsZero() && w >= wrote {
 						if dt := time.Since(wroteAt).Seconds(); dt > 0 {
 							p.st.Bitrate = float64(w-wrote) * 8 / 1000 / dt
@@ -839,9 +868,114 @@ func MergeProfile(p, s models.Transcode) models.Transcode {
 // viewer tracking for HLS (session based, counted by recent playlist hits)
 var viewers sync.Map // id -> *sync.Map[key]time
 
+type seen struct{ first, last time.Time }
+
 func TouchViewer(id int64, key string) {
 	v, _ := viewers.LoadOrStore(id, &sync.Map{})
-	v.(*sync.Map).Store(key, time.Now())
+	now := time.Now()
+	if o, ok := v.(*sync.Map).Load(key); ok {
+		v.(*sync.Map).Store(key, seen{o.(seen).first, now})
+		return
+	}
+	v.(*sync.Map).Store(key, seen{now, now})
+}
+
+// hlsViewers lists HLS viewers seen in the last 30s.
+func hlsViewers(id int64) []HubConn {
+	var r []HubConn
+	if v, ok := viewers.Load(id); ok {
+		v.(*sync.Map).Range(func(k, t any) bool {
+			if x := t.(seen); time.Since(x.last) < 30*time.Second {
+				ip, _, _ := strings.Cut(k.(string), "|")
+				r = append(r, HubConn{Addr: ip, Proto: "hls", Since: x.first})
+			}
+			return true
+		})
+	}
+	return r
+}
+
+var (
+	dumpHdr    = regexp.MustCompile(`^(Input|Output) #\d+`)
+	dumpStream = regexp.MustCompile(`^\s*Stream #(\d+:\d+)(\[0x[0-9a-f]+\])?(\(\w+\))?.*?: (Video|Audio|Subtitle|Data): (.*)$`)
+	dumpRes    = regexp.MustCompile(`\b\d{2,5}x\d{2,5}\b`)
+	dumpNum    = regexp.MustCompile(`([\d.]+) (fps|Hz)`)
+	dumpLayout = regexp.MustCompile(`\b(mono|stereo|[0-9]\.[0-9](\(\w+\))?|quad)\b`)
+)
+
+// dumpLine collects ffmpeg's "Stream #..." dump into a short Xaccel-style
+// summary, e.g. "Stream #0:0[0x1f4]: Video: h264, yuv420p, 1920x1080, 25 fps".
+func dumpLine(p *proc, l string) {
+	if m := dumpHdr.FindStringSubmatch(l); m != nil {
+		p.dumpOut = m[1] == "Output"
+		if strings.HasPrefix(l, "Input #0") {
+			p.infoIn, p.infoOut = nil, nil
+		}
+		return
+	}
+	m := dumpStream.FindStringSubmatch(l)
+	if m == nil {
+		return
+	}
+	rest, out := m[5], []string{strings.Fields(m[5])[0]}
+	parts := strings.Split(rest, ", ")
+	switch m[4] {
+	case "Video":
+		if len(parts) > 1 {
+			out = append(out, strings.SplitN(parts[1], "(", 2)[0])
+		}
+		if r := dumpRes.FindString(rest); r != "" {
+			out = append(out, r)
+		}
+		if n := dumpNum.FindStringSubmatch(rest); n != nil && n[2] == "fps" {
+			out = append(out, n[1]+" fps")
+		}
+	case "Audio":
+		if n := dumpNum.FindStringSubmatch(rest); n != nil && n[2] == "Hz" {
+			out = append(out, n[1]+" Hz")
+		}
+		if c := dumpLayout.FindString(rest); c != "" {
+			out = append(out, c)
+		}
+		if len(parts) > 3 {
+			out = append(out, strings.Fields(parts[3])[0])
+		}
+	}
+	line := "Stream #" + m[1] + m[2] + m[3] + ": " + m[4] + ": " + strings.Join(out, ", ")
+	if p.dumpOut {
+		p.infoOut = append(p.infoOut, line)
+	} else {
+		p.infoIn = append(p.infoIn, line)
+	}
+}
+
+// Details is the expanded stream view: stream dump and viewers.
+type Details struct {
+	In, Out []string
+	Conns   []HubConn
+	Outputs map[int]int // HTTP output number -> viewers
+}
+
+func (m *Manager) Details(id int64) Details {
+	p := m.get(id)
+	p.mu.Lock()
+	d := Details{Outputs: map[int]int{}}
+	d.In = append(d.In, p.infoIn...)
+	d.Out = append(d.Out, p.infoOut...)
+	hubs := map[int]*Hub{0: p.hub}
+	for n, h := range p.ohubs {
+		hubs[n] = h
+	}
+	p.mu.Unlock()
+	for n, h := range hubs {
+		c := h.Conns()
+		d.Outputs[n] = h.Count()
+		d.Conns = append(d.Conns, c...)
+	}
+	hls := hlsViewers(id)
+	d.Outputs[-1] = len(hls)
+	d.Conns = append(d.Conns, hls...)
+	return d
 }
 
 func viewerCount(id int64) int {
@@ -851,7 +985,7 @@ func viewerCount(id int64) int {
 	}
 	n := 0
 	v.(*sync.Map).Range(func(k, t any) bool {
-		if time.Since(t.(time.Time)) < 30*time.Second {
+		if time.Since(t.(seen).last) < 30*time.Second {
 			n++
 		} else {
 			v.(*sync.Map).Delete(k)

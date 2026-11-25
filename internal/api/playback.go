@@ -507,7 +507,7 @@ func (s *Server) serveTS(w http.ResponseWriter, r *http.Request, id int64, hub *
 	if buf > 0 {
 		n = buf / 64
 	}
-	ch, cancel := hub.SubscribeN(n)
+	ch, cancel := hub.SubscribeAs(n, clientIP(r), "http")
 	defer cancel()
 	w.Header().Set("Content-Type", "video/mp2t")
 	w.Header().Set("Cache-Control", "no-cache")

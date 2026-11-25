@@ -222,6 +222,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/stream/{id}/{action}", s.authed(s.streamAction))
 	m.HandleFunc("POST /api/streams/bulk", s.authed(s.bulk))
 	m.HandleFunc("GET /api/stream/{id}/thumb.jpg", s.authed(s.thumb))
+	m.HandleFunc("GET /api/stream/{id}/stats", s.authed(s.streamStats))
 	m.HandleFunc("POST /api/probe", s.authed(s.probe))
 	m.HandleFunc("POST /api/import/m3u", s.admin(s.importM3U))
 	m.HandleFunc("GET /api/export/m3u", s.authed(s.exportM3U))
@@ -978,4 +979,71 @@ func (s *Server) Alert(msg string) error {
 		return fmt.Errorf("telegram status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+type statOut struct {
+	URL         string `json:"url"`
+	Connections int    `json:"connections"`
+}
+
+type statConn struct {
+	Protocol string `json:"protocol"`
+	Address  string `json:"address"`
+	Duration int64  `json:"duration"`
+}
+
+// streamStats feeds the expandable row under a stream (like Xaccel's /stream/{id}/stats).
+func (s *Server) streamStats(w http.ResponseWriter, r *http.Request, _ *models.Account) {
+	id := pathID(r)
+	var x models.Stream
+	if s.St.Get(models.KStream, id, &x) != nil {
+		http.Error(w, "not found", 404)
+		return
+	}
+	st := s.Mgr.Status(id)
+	d := s.Mgr.Details(id)
+	res := map[string]any{
+		"id": id, "state": st.State, "cpu_percent": st.CPU, "mem_rss": st.RSS,
+		"input_urls": x.Inputs, "input_index": st.Input,
+		"streaminfo": map[string]any{"input": d.In, "output": d.Out},
+	}
+	if s.GPU != nil && st.PID > 0 {
+		if u, ok := s.GPU.Proc(st.PID); ok {
+			res["gpu"], res["gpu_dec"], res["gpu_sm"], res["gpu_enc"], res["gpu_mem"] = u.GPU, u.Dec, u.SM, u.Enc, u.FB
+		}
+	}
+	base, q := s.baseURL(r), ""
+	if s.settings().SecurePlayback {
+		q = "?t=" + s.signToken(id, 24*time.Hour)
+	}
+	outs := []statOut{}
+	hls := false
+	for i, o := range x.Outputs {
+		if o.Disabled {
+			continue
+		}
+		switch o.Type {
+		case "http":
+			outs = append(outs, statOut{fmt.Sprintf("%s/stream/%d/%d.ts%s", base, id, i+1, q), d.Outputs[i+1]})
+		case "hls", "hls_master":
+			if !hls {
+				outs = append(outs, statOut{fmt.Sprintf("%s/stream/%d/index.m3u8%s", base, id, q), d.Outputs[-1]})
+			}
+			hls = true
+		default:
+			if o.URL != "" {
+				outs = append(outs, statOut{URL: o.URL})
+			}
+		}
+	}
+	if n := d.Outputs[0]; n > 0 || len(outs) == 0 {
+		outs = append(outs, statOut{fmt.Sprintf("%s/ts/%d%s", base, id, q), n})
+	}
+	res["outputs"] = outs
+	conns := []statConn{}
+	for _, c := range d.Conns {
+		conns = append(conns, statConn{c.Proto, c.Addr, int64(time.Since(c.Since).Seconds())})
+	}
+	res["connections"] = conns
+	writeJSON(w, 200, res)
 }

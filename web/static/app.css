@@ -212,3 +212,26 @@ th{text-transform:uppercase;letter-spacing:.04em;font-size:11px;font-weight:800;
 .eo i{font-style:normal;color:var(--pri);visibility:hidden;font-weight:700}.eo.on i{visibility:visible}
 @media(max-width:760px){.xrows>.rows>.row.xe,.xrows>.rows>.row.xo{grid-template-columns:1fr}.xadd{padding:0}.xrows .oset{grid-template-columns:1fr}}
 .tg.rs{background:#b87aa3}.smt{position:absolute;inset-inline-start:84px;top:50%;transform:translateY(-50%);pointer-events:none}[data-k$="sub_mode"]{position:relative}
+/* Xaccel-style stream table + expandable details */
+table.xs td{vertical-align:middle}
+tr.xr{cursor:pointer}
+tr.xr.shown>td{background:var(--card2)}
+.xb{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11.5px;font-weight:600;line-height:1.5;color:#fff;white-space:nowrap}
+.xb.nm{background:#1a6dff}.xb.nm.stopped{background:#7a869a}.xb.nm.error{background:var(--err)}.xb.nm.starting,.xb.nm.restarting,.xb.nm.waiting{background:var(--warn)}
+.xb.sv{background:#8a7590}.xb.hw{background:#8fa6d4}.xb.err{background:var(--err)}.xb.warn{background:var(--warn)}
+.xa{display:flex;gap:6px;align-items:center}
+.xi{background:none;border:0;padding:2px;cursor:pointer;color:#1a6dff;display:inline-flex}
+.xi svg{width:16px;height:16px;fill:currentColor}.xi.red{color:#e0262f}.xi:hover{opacity:.7}
+tr.xc>td{padding:0 16px 14px;background:var(--card2);cursor:default}
+.xd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.7;direction:ltr;text-align:left;padding-top:10px}
+.xd hr{border:0;border-top:1px solid var(--line);margin:8px 0}
+.x2{display:grid;grid-template-columns:1fr 1fr;gap:24px}.x2>div{min-width:0}
+.xu{display:flex;align-items:center;gap:6px;min-width:0}
+.xu .el{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.xcp{background:none;border:1px solid var(--line);border-radius:4px;padding:1px 4px;cursor:pointer;color:var(--mut);display:inline-flex;flex:none}
+.xcp svg{width:12px;height:12px;fill:currentColor}.xcp:hover{color:var(--pri)}
+.xd .ok{color:var(--ok);white-space:nowrap;flex:none}
+table.xct{width:auto;min-width:420px}table.xct th,table.xct td{padding:2px 14px 2px 0;font-size:12px;border:0;background:none}
+@media(max-width:900px){.x2{grid-template-columns:1fr}}
+table.xs th,table.xs td{padding:9px 8px}
+.xd .xl{min-height:20px}
