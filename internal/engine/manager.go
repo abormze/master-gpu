@@ -580,7 +580,7 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 		running := false
 		var wrote uint64
 		var wroteAt time.Time
-		// ffmpeg's speed/fps are averages since start; show the last ~10s instead
+		// ffmpeg's speed/fps are averages since start; show the last ~30s instead
 		type sample struct {
 			t      time.Time
 			ot, fr int64
@@ -626,7 +626,7 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 				if ot >= 0 {
 					now := time.Now()
 					win = append(win, sample{now, ot, p.st.Frames})
-					for len(win) > 2 && now.Sub(win[0].t) > 10*time.Second {
+					for len(win) > 2 && now.Sub(win[0].t) > 30*time.Second {
 						win = win[1:]
 					}
 					if a, b := win[0], win[len(win)-1]; len(win) >= 2 {
