@@ -661,16 +661,8 @@ func (p *pacer) liveStart() (pend []paceChunk, t0 time.Time, ts0 int64, ok bool)
 // jump skips to the newest keyframe once the queued input runs more than
 // 1.5s behind the live edge (a provider burst after connect or reconnect).
 func (p *pacer) jump(pend []paceChunk, t0 *time.Time, ts0 *int64) []paceChunk {
-	const mask = 1<<33 - 1
-	media := func(d int64) time.Duration { return time.Duration(d&mask) * time.Second / 90000 }
-	newest, head := p.last.Load(), int64(-1)
-	for _, c := range pend {
-		if c.ts >= 0 {
-			head = c.ts
-			break
-		}
-	}
-	if newest < 0 || head < 0 || media(newest-head) < 1500*time.Millisecond || media(newest-head) > time.Hour {
+	queued := span(pend)
+	if queued < 1500*time.Millisecond {
 		return pend
 	}
 	k := -1
@@ -680,17 +672,37 @@ func (p *pacer) jump(pend []paceChunk, t0 *time.Time, ts0 *int64) []paceChunk {
 			break
 		}
 	}
-	if k < 0 || pend[k].ts < 0 || media(pend[k].ts-head) < 500*time.Millisecond || media(pend[k].ts-head) > time.Hour {
+	if k < 0 || pend[k].ts < 0 || queued-span(pend[k:]) < 500*time.Millisecond {
 		return pend
 	}
 	c := pend[k]
-	p.log(fmt.Sprintf("input: %.1fs behind live, jumped to newest keyframe", media(newest-head).Seconds()))
+	p.log(fmt.Sprintf("input: %.1fs behind live, jumped to newest keyframe", queued.Seconds()))
 	c.b = append(c.psi, c.b[c.key:]...)
 	pend = append(pend[:0], pend[k:]...)
 	pend[0] = c
 	for i := range pend {
 		pend[i].fast = true
 	}
-	*t0, *ts0 = time.Now().Add(-media(newest-c.ts)), c.ts
+	*t0, *ts0 = time.Now().Add(-span(pend)), c.ts
 	return pend
+}
+
+// span is the media time queued in pend, counting only steps under a second:
+// a provider timestamp jump is a discontinuity, not backlog.
+func span(pend []paceChunk) time.Duration {
+	const mask = 1<<33 - 1
+	var d time.Duration
+	prev := int64(-1)
+	for _, c := range pend {
+		if c.ts < 0 {
+			continue
+		}
+		if prev >= 0 {
+			if x := time.Duration((c.ts-prev)&mask) * time.Second / 90000; x < time.Second {
+				d += x
+			}
+		}
+		prev = c.ts
+	}
+	return d
 }

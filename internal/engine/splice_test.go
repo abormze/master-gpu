@@ -282,3 +282,36 @@ func (s *syncWriter) get() *dataWriter {
 	defer s.mu.Unlock()
 	return &dataWriter{b: s.w.b}
 }
+
+// A provider timestamp jump is rebased, not treated as backlog to skip.
+func TestPacerDiscontinuity(t *testing.T) {
+	w := &dataWriter{}
+	var logs []string
+	var lmu sync.Mutex
+	p := newPacerWith(w, 0, func(s string) { lmu.Lock(); logs = append(logs, s); lmu.Unlock() }, true, nil)
+	start := time.Now()
+	n := 0
+	for i := 0; time.Since(start) < 3*time.Second; i++ {
+		ts := int64(i) * 1800
+		if i >= 50 {
+			ts += 19 * 90000
+		}
+		key, psi := -1, []byte(nil)
+		if i%50 == 0 {
+			key, psi = 1, []byte{9}
+		}
+		time.Sleep(time.Until(start.Add(time.Duration(i) * 20 * time.Millisecond)))
+		p.pushKey([]byte{0, 1}, ts, key, psi)
+		n++
+	}
+	time.Sleep(200 * time.Millisecond)
+	p.close()
+	lmu.Lock()
+	defer lmu.Unlock()
+	if j := strings.Join(logs, "\n"); strings.Contains(j, "jumped") {
+		t.Fatalf("jumped on a discontinuity: %s", j)
+	}
+	if len(w.b) < n-60 {
+		t.Fatalf("wrote %d of %d chunks", len(w.b), n)
+	}
+}
