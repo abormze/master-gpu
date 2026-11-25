@@ -351,11 +351,16 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 		} else if m.Relay != nil {
 			opts.Proxy = m.Relay(&s)
 		}
-		for _, out := range s.Outputs {
-			n := out.Name
-			if n == "" {
-				continue
+		src := opts.Input
+		var spl *splicer
+		if !s.DRM.Enabled && !st.InputDirect && spliceable(opts.Input) {
+			ua := s.UserAgent
+			if ua == "" {
+				ua = st.UserAgent
 			}
+			spl = newSplicer(opts.Input, ua, s.Referer, s.Headers, opts.Proxy, time.Duration(st.StreamTimeout)*time.Second/2,
+				func(msg string) { m.st.Log("stream", id, "info", msg) })
+			opts.Input = "pipe:0"
 		}
 		args, variants, err := Build(&s, &st, opts)
 		if err != nil {
@@ -376,13 +381,13 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 		}
 		writeMaster(root, variants)
 		p.mu.Lock()
-		p.st.Input, p.st.InputURL, p.st.GPU, p.st.Variants = idx, redact(opts.Input), g, variants
+		p.st.Input, p.st.InputURL, p.st.GPU, p.st.Variants = idx, redact(src), g, variants
 		p.st.FPS, p.st.Speed, p.st.Bitrate, p.st.Frames = 0, 0, 0, 0
 		p.mu.Unlock()
 		m.setState(id, s.Name, p, Starting, "")
 		m.st.Log("stream", id, "info", fmt.Sprintf("start input #%d gpu=%d", idx+1, g))
 		started := time.Now()
-		reason := m.run(runCtx, id, &s, &st, p, args)
+		reason := m.run(runCtx, id, &s, &st, p, args, spl)
 		runCancel()
 		if ctx.Err() != nil {
 			m.setState(id, s.Name, p, Stopped, "")
@@ -463,9 +468,17 @@ func (m *Manager) pickGPU(s *models.Stream, st models.Settings) int {
 
 var progRe = regexp.MustCompile(`^(\w+)=(.*)$`)
 
-func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *models.Settings, p *proc, args []string) string {
+func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *models.Settings, p *proc, args []string, spl *splicer) string {
 	cmd := exec.Command(st.FFmpegPath, args...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true, Pdeathsig: syscall.SIGKILL}
+	var ir, iw *os.File
+	if spl != nil {
+		var err error
+		if ir, iw, err = os.Pipe(); err != nil {
+			return err.Error()
+		}
+		cmd.Stdin = ir
+	}
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	pr, pw, err := os.Pipe()
@@ -489,6 +502,10 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 		}
 	}
 	if err := cmd.Start(); err != nil {
+		if ir != nil {
+			ir.Close()
+			iw.Close()
+		}
 		pr.Close()
 		closeW()
 		for _, f := range ors {
@@ -497,6 +514,10 @@ func (m *Manager) run(ctx context.Context, id int64, s *models.Stream, st *model
 		return "spawn: " + err.Error()
 	}
 	closeW()
+	if ir != nil {
+		ir.Close()
+		go func() { spl.run(ctx, iw); iw.Close() }()
+	}
 	go p.hub.Pump(pr)
 	for i, f := range ors {
 		h := ohubs[i]
