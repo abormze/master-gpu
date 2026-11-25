@@ -9,6 +9,7 @@ import (
 	"hash/crc32"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -1009,7 +1010,7 @@ func (s *Server) streamStats(w http.ResponseWriter, r *http.Request, _ *models.A
 	}
 	if s.GPU != nil && st.PID > 0 {
 		if u, ok := s.GPU.Proc(st.PID); ok {
-			res["gpu"], res["gpu_dec"], res["gpu_sm"], res["gpu_enc"], res["gpu_mem"] = u.GPU, u.Dec, u.SM, u.Enc, u.FB
+			res["gpu"], res["gpu_dec"], res["gpu_sm"], res["gpu_enc"], res["gpu_mem"] = u.GPU, math.Round(u.Dec), math.Round(u.SM), math.Round(u.Enc), u.FB
 		}
 	}
 	base, q := s.baseURL(r), ""

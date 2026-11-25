@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"math"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -65,6 +66,29 @@ type Monitor struct {
 	smi  string
 	fake int
 	pids map[int]ProcUse
+	hist map[int][]float64 // per card: last samples of util, enc, dec (flattened triples)
+}
+
+// smoothWin is how many polls the util/enc/dec figures are averaged over.
+// NVML reports encoder busy time over a short, irregular window, so a single
+// reading jumps 0%..90% while the real load is steady.
+const smoothWin = 8
+
+func (m *Monitor) smooth(c *Card) {
+	if m.hist == nil {
+		m.hist = map[int][]float64{}
+	}
+	h := append(m.hist[c.Index], c.Util, c.Enc, c.Dec)
+	if len(h) > 3*smoothWin {
+		h = h[len(h)-3*smoothWin:]
+	}
+	m.hist[c.Index] = h
+	var u, e, d float64
+	n := float64(len(h) / 3)
+	for i := 0; i < len(h); i += 3 {
+		u, e, d = u+h[i], e+h[i+1], d+h[i+2]
+	}
+	c.Util, c.Enc, c.Dec = math.Round(u/n), math.Round(e/n), math.Round(d/n)
 }
 
 // ProcUse is one process's share of a card, from nvidia-smi pmon.
@@ -195,6 +219,16 @@ func (m *Monitor) poll() {
 		}
 	}
 	m.mu.Lock()
+	for i := range info.Cards {
+		m.smooth(&info.Cards[i])
+	}
+	for pid, u := range pids {
+		if o, ok := m.pids[pid]; ok && o.GPU == u.GPU {
+			ema := func(o, n float64) float64 { return (o*(smoothWin-1) + n) / smoothWin }
+			u.SM, u.Enc, u.Dec, u.Mem = ema(o.SM, u.SM), ema(o.Enc, u.Enc), ema(o.Dec, u.Dec), ema(o.Mem, u.Mem)
+			pids[pid] = u
+		}
+	}
 	m.pids = pids
 	m.info = info
 	m.mu.Unlock()

@@ -384,7 +384,7 @@ function bindForm(root, fields) {
       if ("oadd" in d) $(".rows", fe).insertAdjacentHTML("beforeend", await outRow({ type: "hls" }, $$(".rows > .row", fe).length));
       if ("orm" in d) row.remove();
       if ("oset" in d) { const g = $(".oset", row); g.style.display = g.style.display === "none" ? "" : "none"; }
-      if ("ocopy" in d) { const u = $(".ourl", row).value; navigator.clipboard?.writeText(u).then(() => toast(L("Copied|تم النسخ")), () => { $(".ourl", row).select(); document.execCommand("copy"); }); }
+      if ("ocopy" in d) { const u = $(".ourl", row).value; copyText(u); }
     }
     if (rm || xb) xRefresh(root);
     const es = e.target.closest(".esel");
@@ -630,7 +630,10 @@ const XI = {
   cp: `<svg viewBox="0 0 24 24"><path d="M8 3h11a2 2 0 0 1 2 2v11h-2V5H8zM4 7h11a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2z"/></svg>`
 };
 const hms = s => { s = Math.max(0, +s || 0); const h = Math.floor(s / 3600), p = n => String(n).padStart(2, "0"); return `${p(h)}:${p(Math.floor(s % 3600 / 60))}:${p(Math.floor(s % 60))}`; };
-const copyText = t => navigator.clipboard?.writeText(t).then(() => toast(L("Copied|تم النسخ")), () => toast(t)) ?? toast(t);
+const copyText = t => {
+  const legacy = () => { const ta = document.createElement("textarea"); ta.value = t; ta.setAttribute("readonly", ""); ta.style.cssText = "position:fixed;top:0;left:0;opacity:0"; document.body.append(ta); ta.select(); ta.setSelectionRange(0, t.length); let ok = false; try { ok = document.execCommand("copy"); } catch { } ta.remove(); toast(ok ? L("Copied|تم النسخ") : t, !ok); };
+  if (window.isSecureContext && navigator.clipboard) navigator.clipboard.writeText(t).then(() => toast(L("Copied|تم النسخ")), legacy); else legacy();
+};
 function hwTags(r) {
   if (r.mode === "copy") return `<span class="xb hw">COPY</span>`;
   if (r.mode === "drm") return `<span class="xb hw">DRM</span>`;
