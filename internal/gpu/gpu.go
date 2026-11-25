@@ -241,3 +241,41 @@ func num(s string) float64 {
 }
 
 func atoi(s string) int { v, _ := strconv.Atoi(s); return v }
+
+// LockClocks enables persistence mode and pins every card's SM/video and memory
+// clocks at their maximum so NVENC never runs on a down-clocked GPU.
+func (m *Monitor) LockClocks() []string {
+	if m.fake > 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	run := func(a ...string) error { return exec.CommandContext(ctx, m.smi, a...).Run() }
+	out, err := exec.CommandContext(ctx, m.smi, "--query-gpu=index,clocks.max.sm,clocks.max.memory", "--format=csv,noheader,nounits").Output()
+	if err != nil {
+		return nil
+	}
+	var msgs []string
+	if err := run("-pm", "1"); err != nil {
+		msgs = append(msgs, "persistence mode: "+err.Error())
+	}
+	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Split(ln, ",")
+		if len(f) < 3 {
+			continue
+		}
+		i, sm, mem := strings.TrimSpace(f[0]), strings.TrimSpace(f[1]), strings.TrimSpace(f[2])
+		if atoi(sm) <= 0 {
+			continue
+		}
+		if atoi(mem) > 0 {
+			_ = run("-i", i, "-ac", mem+","+sm)
+		}
+		if err := run("-i", i, "-lgc", sm+","+sm); err != nil {
+			msgs = append(msgs, "GPU"+i+" lock clocks: "+err.Error())
+		} else {
+			msgs = append(msgs, "GPU"+i+" clocks locked at "+sm+" MHz")
+		}
+	}
+	return msgs
+}

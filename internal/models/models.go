@@ -51,6 +51,7 @@ type Settings struct {
 	LBCPUFallback  bool     `json:"lb_cpu_fallback"`
 	LBViewerMode   string   `json:"lb_viewer_mode"`
 	LBAutoMigrate  bool     `json:"lb_auto_migrate"`
+	GPUFreeClocks  bool     `json:"gpu_free_clocks"` // don't lock GPU/NVENC clocks at max on start
 	DefaultHLSTime int      `json:"default_hls_time"`
 	DefaultHLSList int      `json:"default_hls_list"`
 	UserAgent      string   `json:"user_agent"`

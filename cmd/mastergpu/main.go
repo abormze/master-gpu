@@ -95,6 +95,13 @@ func main() {
 		}
 		addr = fmt.Sprintf(":%d", p)
 	}
+	if !set.GPUFreeClocks {
+		go func() {
+			for _, m := range gm.LockClocks() {
+				st.Log("panel", 0, "info", m)
+			}
+		}()
+	}
 	ds := &drm.Service{St: st, LocalBase: "http://" + loopback(addr), FFmpegVer: mgr.FFVersion}
 	mgr.PrepDRM, mgr.Relay = ds.Prep, ds.Relay
 
