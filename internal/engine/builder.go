@@ -571,24 +571,28 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	// every mapped audio stream gets every audio encoder: out index = map*len(aenc)+encoder
 	for i := range len(amaps) * len(aenc) {
 		ae, amap := aenc[i%len(aenc)], amaps[i/len(aenc)]
-		ai := strconv.Itoa(i)
+		// a single map+encoder may expand to several tracks ("0:a"): apply options to all of them
+		ai := ":" + strconv.Itoa(i)
+		if len(amaps)*len(aenc) == 1 {
+			ai = ""
+		}
 		a = append(a, "-map", amap)
 		if ae.Codec == "copy" || ae.Codec == "" {
-			a = append(a, "-c:a:"+ai, "copy")
+			a = append(a, "-c:a"+ai, "copy")
 			continue
 		}
-		a = append(a, "-c:a:"+ai, audioEncFor(st.FFmpegPath, ae.Codec))
+		a = append(a, "-c:a"+ai, audioEncFor(st.FFmpegPath, ae.Codec))
 		if ae.Bitrate > 0 {
-			a = append(a, "-b:a:"+ai, strconv.Itoa(ae.Bitrate)+"k")
+			a = append(a, "-b:a"+ai, strconv.Itoa(ae.Bitrate)+"k")
 		}
 		if t.AudioChannels > 0 {
-			a = append(a, "-ac:a:"+ai, strconv.Itoa(t.AudioChannels))
+			a = append(a, "-ac:a"+ai, strconv.Itoa(t.AudioChannels))
 		}
 		if t.AudioRate > 0 {
-			a = append(a, "-ar:a:"+ai, strconv.Itoa(t.AudioRate))
+			a = append(a, "-ar:a"+ai, strconv.Itoa(t.AudioRate))
 		}
 		if len(af) > 0 {
-			a = append(a, "-filter:a:"+ai, strings.Join(af, ","))
+			a = append(a, "-filter:a"+ai, strings.Join(af, ","))
 		}
 	}
 	// extra DRM audio tracks from secondary inputs
