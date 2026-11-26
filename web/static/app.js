@@ -207,7 +207,7 @@ window.addEventListener("hashchange", () => S.me && page());
 function applyPrefs() { document.documentElement.dir = S.lang === "ar" ? "rtl" : "ltr"; document.documentElement.lang = S.lang; document.documentElement.dataset.theme = S.theme; }
 async function boot() {
   applyPrefs();
-  S.ver = await fetch("/api/version").then(r => r.json()).catch(() => ({}));
+  S.ver = await fetch("/api/version", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
   try { S.me = await api("me"); } catch { S.me = null; }
   render();
 }

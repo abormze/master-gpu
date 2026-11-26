@@ -180,6 +180,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/login", s.login)
 	m.HandleFunc("POST /api/logout", s.logout)
 	m.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
 		ok(w, map[string]any{"name": version.Name, "version": version.Version, "build": version.Build})
 	})
 	m.HandleFunc("GET /api/me", s.authed(func(w http.ResponseWriter, r *http.Request, ac *models.Account) {
