@@ -2,7 +2,7 @@ package version
 
 const (
 	Name    = "Master GPU"
-	Version = "1.0.7"
+	Version = "1.0.8"
 )
 
 // Build is injected at link time (-X gpupanel/internal/version.Build=...).
