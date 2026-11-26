@@ -214,7 +214,7 @@ func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
 	if len(o.InputKeys) > 0 && o.InputKeys[0] != "" {
 		a = append(a, keyOpt, o.InputKeys[0])
 	}
-	a = append(a, "-thread_queue_size", "1024", "-i", in)
+	a = append(append(a, inputQueue(o.FFmpegVer)...), "-i", in)
 	for i, x := range o.Inputs2 {
 		if i+1 < len(o.InputKeys) && o.InputKeys[i+1] != "" {
 			a = append(a, keyOpt, o.InputKeys[i+1])
@@ -222,7 +222,7 @@ func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
 		if o.CopyTS {
 			a = append(a, "-re")
 		}
-		a = append(a, "-thread_queue_size", "1024", "-i", x)
+		a = append(append(a, inputQueue(o.FFmpegVer)...), "-i", x)
 	}
 	return a
 }
@@ -994,4 +994,12 @@ func escFilter(s string) string {
 func escText(s string) string {
 	r := strings.NewReplacer(`\`, `\\\\`, `'`, `\\\'`, `:`, `\\:`, `%`, `\\%`, `,`, `\,`)
 	return r.Replace(s)
+}
+
+// inputQueue sizes the demuxer queue; FFmpeg 9 made -thread_queue_size a muxer-only option.
+func inputQueue(ffVer int) []string {
+	if ffVer >= 9 {
+		return nil
+	}
+	return []string{"-thread_queue_size", "1024"}
 }

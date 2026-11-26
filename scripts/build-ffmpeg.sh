@@ -6,7 +6,7 @@ set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq && apt-get install -y -qq build-essential nasm pkg-config clang llvm libx264-dev libx265-dev libnuma-dev libmp3lame-dev libopus-dev libssl-dev libsrt-openssl-dev libfreetype-dev libass-dev libfontconfig-dev libfribidi-dev libharfbuzz-dev libxml2-dev zlib1g-dev >/dev/null
 cd /b/nvh122 && make install PREFIX=/usr >/dev/null
-L=/usr/lib/x86_64-linux-gnu; for l in x264 x265 srt-openssl numa; do rm -f $L/lib$l.so; done
+L=/usr/lib/x86_64-linux-gnu; for l in x264 x265 srt numa; do rm -f $L/lib$l.so; done
 cd /b/ffmpeg-9.1
 ./configure --prefix=/b/out --extra-version=mastergpu --extra-ldflags="-static-libgcc -static-libstdc++" --extra-libs="-lstdc++ -lnuma -lssl -lcrypto -ldl -lpthread -lm" --enable-gpl --enable-version3 --disable-doc --disable-ffplay --disable-debug \
  --enable-libx264 --enable-libx265 --enable-libmp3lame --enable-libopus --enable-libsrt --enable-openssl \
