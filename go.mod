@@ -10,6 +10,8 @@ require (
 )
 
 require (
+	github.com/benburkert/openpgp v0.0.0-20160410205803-c2471f86866c // indirect
+	github.com/datarhei/gosrt v0.6.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect

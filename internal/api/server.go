@@ -25,6 +25,7 @@ import (
 	"gpupanel/internal/engine"
 	"gpupanel/internal/gpu"
 	"gpupanel/internal/models"
+	"gpupanel/internal/srtin"
 	"gpupanel/internal/store"
 	"gpupanel/internal/sysmon"
 	"gpupanel/internal/version"
@@ -39,6 +40,7 @@ type Server struct {
 	Web     fs.FS
 	Updater *Updater
 	DRM     *drm.Service
+	SRT     *srtin.Manager
 	Started time.Time
 	mux     *http.ServeMux
 	kinds   map[string]kindOps
@@ -86,6 +88,7 @@ func New(s *Server) *Server {
 	add(models.KBalancer, reg(func(v *models.Balancer, id int64) { v.ID = id }), func() any { return store.List[models.Balancer](st, models.KBalancer) })
 	add(models.KIPRule, reg(func(v *models.IPRule, id int64) { v.ID = id }), func() any { return store.List[models.IPRule](st, models.KIPRule) })
 	add(models.KProxy, reg(func(v *models.Proxy, id int64) { v.ID = id }), func() any { return store.List[models.Proxy](st, models.KProxy) })
+	add(models.KSRTIn, reg(func(v *models.SRTIngest, id int64) { v.ID = id }), func() any { return store.List[models.SRTIngest](st, models.KSRTIn) })
 	add(models.KDRMKey, reg(func(v *models.DRMKey, id int64) { v.ID = id }), func() any { return store.List[models.DRMKey](st, models.KDRMKey) })
 	acc := reg(func(v *models.Account, id int64) { v.ID = id })
 	acc.admin = true
@@ -229,6 +232,7 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/export/m3u", s.authed(s.exportM3U))
 
 	// generic CRUD
+	s.srtRoutes()
 	m.HandleFunc("GET /api/{kind}", s.authed(s.list))
 	m.HandleFunc("POST /api/{kind}", s.authed(s.create))
 	m.HandleFunc("GET /api/{kind}/{id}", s.authed(s.get))

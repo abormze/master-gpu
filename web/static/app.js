@@ -172,6 +172,8 @@ const SCHEMAS = {
   server: { f: [F.t("name", "Name|الاسم", { req: 1 }), F.t("host", "Host / IP"), F.t("public_host", "Public domain|الدومين"), F.n("http_port", "HTTP port"), F.n("https_port", "HTTPS port"), F.n("ssh_port", "SSH port"), F.t("ssh_user", "SSH user"), F.p("ssh_password", "SSH password"), F.n("max_clients", "Max clients|أقصى مشاهدين"), F.n("max_download", "Max down Mbps"), F.n("max_upload", "Max up Mbps"), F.b("lb_enabled", "In viewer balancer|ضمن موزع المشاهدين"), F.n("lb_weight", "LB weight|الوزن"), F.b("disabled", "Disabled|معطل"), F.a("note", "Note|ملاحظة", { w: 1 })], def: { http_port: 8080, ssh_port: 22, ssh_user: "root", lb_weight: 1 }, cols: [["name", "Name|الاسم"], ["host", "Host"], ["public_host", "Domain|الدومين"], [x => x.lb_enabled ? '<span class="chip ok">LB</span>' : "", "LB"], [x => x.disabled ? '<span class="chip err">off</span>' : '<span class="chip ok">on</span>', "State|الحالة"]] },
   balancer: { f: [F.t("name", "Name|الاسم", { req: 1 }), F.s("type", "Type|النوع", opts(["gpu", "GPU (place streams)|GPU (توزيع القنوات)"], ["viewer", "Viewers (HTTP redirect)|المشاهدين"])), F.s("strategy", "Strategy|الطريقة", opts(["least_load", "Least load|الأقل حمل"], ["round_robin", "Round robin|بالدور"], ["fill_first", "Fill first|تعبئة الأول"], ["least_conn", "Least connections|أقل اتصالات"], ["weighted", "Weighted|بالوزن"])), F.m("servers", "Servers|السيرفرات", "server", { w: 1 }), F.n("max_enc", "Max NVENC %|أقصى ترميز"), F.n("max_mem", "Max VRAM %|أقصى ذاكرة"), F.n("max_temp", "Max temp °C|أقصى حرارة"), F.n("max_per_gpu", "Max streams / GPU|أقصى قنوات لكل كرت"), F.b("cpu_fallback", "CPU fallback when GPUs full|التحويل للمعالج"), F.b("auto_move", "Auto-migrate on failure|نقل تلقائي عند العطل"), F.b("enabled", "Enabled|مفعل")], def: { type: "gpu", strategy: "least_load", max_enc: 90, max_mem: 92, max_temp: 85, enabled: true, auto_move: true }, cols: [["name", "Name|الاسم"], [x => `<span class="chip pri">${esc(x.type)}</span>`, "Type|النوع"], ["strategy", "Strategy|الطريقة"], [x => (x.servers || []).length || L("local|محلي"), "Servers|السيرفرات"], [x => x.enabled ? '<span class="chip ok">on</span>' : '<span class="chip">off</span>', "State|الحالة"]] },
   drmkey: { f: [F.t("name", "Name|الاسم", { req: 1 }), F.t("kid", "KID (hex)", { mono: 1 }), F.p("key", "KEY (hex)"), F.t("content_id", "Content ID"), F.a("pssh", "PSSH", { w: 1 }), F.a("note", "Note|ملاحظة", { w: 1 })], cols: [["name", "Name|الاسم"], [x => `<span class="mono">${esc(x.kid)}</span>`, "KID"], ["content_id", "Content ID"]] },
+  srtin: { f: [F.t("name", "Name|الاسم", { req: 1 }), F.n("port", "SRT port (listener)|بورت SRT"), F.n("latency", "Latency ms|التأخير ms"), F.p("passphrase", "Passphrase (optional)|كلمة سر التشفير"), F.t("output", "Output|المخرج", { ph: "udp://239.200.0.5:1234", w: 1 }), F.t("bind", "Bind IP (empty = all)|IP الاستماع"), F.b("disabled", "Disabled|معطل"), F.a("note", "Note|ملاحظة", { w: 1 })], def: { latency: 1000, output: "udp://239.200.0.1:1234" },
+    cols: [["name", "Name|الاسم"], [x => `<span class="mono">srt://:${x.port}?latency=${x.latency || 120}</span>`, "Input|المدخل"], [x => `<span class="mono">${esc(x.output)}</span>`, "Output|المخرج"], [x => x.disabled ? `<span class="chip">${L("Disabled|معطل")}</span>` : `<span data-srt="${x.id}" class="chip">…</span>`, "Status|الحالة"], [x => `<span data-srtr="${x.id}" class="mut"></span>`, "Bitrate|الصبيب"]] },
   proxy: { f: [F.t("name", "Name|الاسم", { req: 1 }), F.s("type", "Type|النوع", opts("http", "https", "socks5")), F.t("host", "Host"), F.n("port", "Port"), F.t("username", "Username|المستخدم"), F.p("password", "Password|كلمة المرور"), F.t("bind_ip", "Bind IP"), F.t("pool", "Pool (rotation group)|مجموعة التدوير"), F.b("disabled", "Disabled|معطل"), F.a("note", "Note|ملاحظة", { w: 1 })], def: { type: "http" }, cols: [["name", "Name|الاسم"], [x => `<span class="chip pri">${esc(x.type)}</span>`, "Type|النوع"], [x => esc(`${x.host}:${x.port}`), "Address|العنوان"], ["pool", "Pool|المجموعة"]] },
   adapter: { f: [F.t("name", "Name|الاسم", { req: 1 }), F.r("server_id", "Server|السيرفر", "server"), F.n("device", "Adapter #"), F.s("system", "System", opts("DVB-S", "DVB-S2", "DVB-T", "DVB-T2", "DVB-C", "ATSC")), F.s("modulation", "Modulation", opts("AUTO", "QPSK", "8PSK", "16APSK", "32APSK", "QAM16", "QAM64", "QAM256")), F.n("frequency", "Frequency MHz"), F.n("symbol_rate", "Symbol rate"), F.n("voltage", "LNB voltage", {}), F.t("diseqc", "DiSEqC"), F.t("fec", "FEC"), F.t("pilot", "Pilot"), F.t("rolloff", "Rolloff"), F.t("inversion", "Inversion"), F.b("budget", "Budget mode"), F.t("pls_mode", "PLS mode"), F.n("pls_code", "PLS code"), F.n("stream_id", "Stream ID"), F.t("charset", "Charset"), F.r("softcam_id", "SoftCAM", "softcam"), F.t("udp_addr", "UDP output", { ph: "239.0.0.1:1234" }), F.b("enabled", "Enabled|مفعل")], def: { system: "DVB-S2", modulation: "AUTO", enabled: true }, cols: [["name", "Name|الاسم"], ["system", "System"], ["frequency", "Freq"], ["symbol_rate", "SR"], ["udp_addr", "UDP"]] },
   softcam: { f: [F.t("name", "Name|الاسم", { req: 1 }), F.s("protocol", "Protocol", opts("cs378x", "newcamd")), F.t("host", "Host"), F.n("port", "Port"), F.t("username", "Username|المستخدم"), F.p("password", "Password|كلمة المرور"), F.t("caid", "CAID"), F.p("des_key", "DES key")], def: { protocol: "cs378x" }, cols: [["name", "Name|الاسم"], ["protocol", "Protocol"], [x => esc(`${x.host}:${x.port}`), "Address|العنوان"], ["caid", "CAID"]] },
@@ -192,7 +194,7 @@ async function loadRef(kind, force) { if (!S.cache[kind] || force) S.cache[kind]
 /* ---------- router & shell ---------- */
 const NAV = [
   ["", [["dash", "dash", "Dashboard|لوحة التحكم"], ["gpu", "gpu", "GPUs|كروت الشاشة"]]],
-  ["Streaming|البث", [["streams", "stream", "Streams|القنوات"], ["profile", "profile", "Profiles|البروفايلات"], ["drmkey", "drm", "DRM keys|مفاتيح DRM"], ["proxy", "proxy", "Proxies|البروكسيات"], ["adapter", "dvb", "DVB"], ["softcam", "cam", "SoftCAM"], ["category", "log", "Categories|التصنيفات"]]],
+  ["Streaming|البث", [["streams", "stream", "Streams|القنوات"], ["profile", "profile", "Profiles|البروفايلات"], ["drmkey", "drm", "DRM keys|مفاتيح DRM"], ["proxy", "proxy", "Proxies|البروكسيات"], ["srtin", "stream", "SRT Ingest|استقبال SRT"], ["adapter", "dvb", "DVB"], ["softcam", "cam", "SoftCAM"], ["category", "log", "Categories|التصنيفات"]]],
   ["VOD", [["movie", "vod", "Movies|الأفلام"], ["series", "vod", "Series|المسلسلات"], ["episode", "vod", "Episodes|الحلقات"]]],
   ["Infrastructure|البنية", [["server", "server", "Servers|السيرفرات"], ["balancer", "lb", "Load balancer|موزع الحمل"], ["iprule", "shield", "Firewall (NGINX)|الجدار الناري"]]],
   ["Subscribers|المشتركين", [["user", "user", "Users|المستخدمين"], ["bouquet", "bouquet", "Bouquets|البوكيهات"], ["package", "pkg", "Packages|الباقات"], ["account", "acc", "Accounts|الحسابات", 1]]],
@@ -803,6 +805,35 @@ VIEWS.settings = async el => {
   el.innerHTML = body + `<div style="position:sticky;bottom:16px;text-align:end"><button class="btn p" id="ss">${L("Save settings|حفظ الإعدادات")}</button></div>`;
   bindForm(el, all);
   $("#ss").onclick = async () => { const o = structuredClone(st); $$(".form > .f[data-k]", el).forEach(e => readField(e, o)); await tryDo(() => api("settings", { method: "PUT", body: o }), L("Settings saved|تم حفظ الإعدادات")); };
+};
+
+VIEWS.srtin = async el => {
+  await crudView("srtin", el);
+  const bar = $(".tbar", el); if (!bar) return;
+  bar.insertAdjacentHTML("beforeend", `<button class="btn" id="srtBulk">${ico("plus")} ${L("Add range|إضافة مجموعة")}</button><button class="btn" id="srtImp">${L("Import srt-live-transmit|استيراد srt-live-transmit")}</button>`);
+  const reload = () => VIEWS.srtin(el);
+  $("#srtBulk").onclick = async () => {
+    const a = prompt(L("From port, count, output ({n} = number), latency ms|البورت الأول، العدد، المخرج ({n} = الرقم)، التأخير"), "10001 34 udp://239.200.0.{n}:1234 1000"); if (!a) return;
+    const [p, c, o, l] = a.trim().split(/\s+/);
+    await tryDo(() => api("srtin/bulk", { method: "POST", body: { from_port: +p, count: +c, output: o, start: 1, latency: +l || 1000, prefix: "hot" } }), L("Added|تمت الإضافة")); reload();
+  };
+  $("#srtImp").onclick = async () => {
+    const t = prompt(L("Paste srt-live-transmit lines, or leave empty to scan /etc/init.d/iptv on this server|الصق أوامر srt-live-transmit أو اتركه فارغ لقراءة /etc/init.d/iptv"), ""); if (t === null) return;
+    const dis = confirm(L("Import as disabled? (OK if srt-live-transmit still uses these ports)|استيراد كمعطل؟ (موافق إذا srt-live-transmit لسا شغال على نفس البورتات)"));
+    const r = await tryDo(() => api("srtin/import", { method: "POST", body: { text: t, disabled: dis } })); r && toast(`${L("Found|وجد")} ${r.found} · ${L("Added|أضيف")} ${r.added}`); reload();
+  };
+  const tick = async () => {
+    if (!document.body.contains(bar)) return clearInterval(tm);
+    const st = await api("srtin/status").catch(() => []);
+    st.forEach(x => {
+      const e = $(`[data-srt="${x.id}"]`, el), b = $(`[data-srtr="${x.id}"]`, el); if (!e) return;
+      const cls = x.state === "connected" ? "ok" : x.state === "error" ? "err" : "pri";
+      e.className = "chip " + cls; e.title = x.error || x.peer || "";
+      e.textContent = x.state === "connected" ? `${L("Connected|متصل")} ${x.peer}` : x.state === "listening" ? L("Waiting|بانتظار البث") : x.state === "error" ? x.error : x.state;
+      b.textContent = x.state === "connected" ? `${x.mbps.toFixed(2)} Mbps · ${L("lost|ضايع")} ${x.lost}` : "";
+    });
+  };
+  const tm = setInterval(tick, 2000); tick();
 };
 
 boot();

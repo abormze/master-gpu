@@ -19,6 +19,7 @@ const (
 	KBalancer = "balancer"
 	KIPRule   = "iprule"
 	KProxy    = "proxy"
+	KSRTIn    = "srtin"
 	KDRMKey   = "drmkey"
 )
 
@@ -470,4 +471,18 @@ type DRMKey struct {
 	ContentID string `json:"content_id"`
 	PSSH      string `json:"pssh"`
 	Note      string `json:"note"`
+}
+
+// SRTIngest is a built-in SRT listener that relays an incoming SRT publisher to a
+// UDP/multicast address (replaces srt-live-transmit + monit per channel).
+type SRTIngest struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Port       int    `json:"port"`
+	Bind       string `json:"bind"`
+	Latency    int    `json:"latency"` // ms
+	Passphrase string `json:"passphrase"`
+	Output     string `json:"output"` // udp://239.200.0.5:1234
+	Disabled   bool   `json:"disabled"`
+	Note       string `json:"note"`
 }

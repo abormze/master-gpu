@@ -19,6 +19,7 @@ import (
 	"gpupanel/internal/engine"
 	"gpupanel/internal/gpu"
 	"gpupanel/internal/models"
+	"gpupanel/internal/srtin"
 	"gpupanel/internal/store"
 	"gpupanel/internal/sysmon"
 	"gpupanel/internal/version"
@@ -116,7 +117,9 @@ func main() {
 	ds := &drm.Service{St: st, LocalBase: "http://" + loopback(addr), FFmpegVer: mgr.FFVersion}
 	mgr.PrepDRM, mgr.Relay = ds.Prep, ds.Relay
 
-	srv := api.New(&api.Server{St: st, Auth: auth, Mgr: mgr, Sys: sm, GPU: gm, Web: web.FS(), DRM: ds,
+	srtm := srtin.New(st)
+	go srtm.Run(stop)
+	srv := api.New(&api.Server{SRT: srtm, St: st, Auth: auth, Mgr: mgr, Sys: sm, GPU: gm, Web: web.FS(), DRM: ds,
 		Updater: &api.Updater{Bin: bin, Before: mgr.StopAll}})
 	mgr.Hooks.OnState = func(id int64, name string, from, to engine.State, msg string) {
 		if to == engine.Failed && from == engine.Running {
