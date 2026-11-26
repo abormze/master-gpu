@@ -29,6 +29,7 @@ type Settings struct {
 	Theme          string   `json:"theme"`
 	FFmpegPath     string   `json:"ffmpeg_path"`
 	FFprobePath    string   `json:"ffprobe_path"`
+	FFmpegNoBundle bool     `json:"ffmpeg_no_bundle"` // don't download the bundled FFmpeg build
 	HLSDir         string   `json:"hls_dir"`
 	StreamTimeout  int      `json:"stream_timeout"`
 	RestartDelay   int      `json:"restart_delay"`

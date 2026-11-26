@@ -28,9 +28,11 @@ func FFmpegForDriver(driver string, candidates []string) string {
 				continue
 			}
 		}
-		v := ffMajor(c)
+		v, sdk12 := ffMajor(c), isSDK12Build(c)
 		need := map[bool]int{true: 0}[true]
 		switch {
+		case v >= 8 && sdk12:
+			need = 550 // Master GPU build pinned to NVENC SDK 12.2
 		case v >= 8:
 			need = 570
 		case v >= 6:
@@ -48,6 +50,14 @@ func FFmpegForDriver(driver string, candidates []string) string {
 		}
 	}
 	return best
+}
+
+// isSDK12Build reports the Master GPU FFmpeg bundle, built against NVENC SDK 12.2 (driver >= 550).
+func isSDK12Build(bin string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, bin, "-hide_banner", "-version").Output()
+	return strings.Contains(string(out), "-mastergpu")
 }
 
 var ffVerRe = regexp.MustCompile(`ffmpeg version n?(\d+)`)

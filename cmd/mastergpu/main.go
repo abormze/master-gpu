@@ -80,6 +80,11 @@ func main() {
 	gm := gpu.New()
 	set := models.DefaultSettings()
 	_ = st.Get(models.KSettings, 1, &set)
+	if !set.FFmpegNoBundle {
+		if err := ensureFFmpegBundle(); err != nil {
+			log.Printf("ffmpeg bundle: %v", err)
+		}
+	}
 	if p := pickFFmpeg(set.FFmpegPath, gm); p != "" && p != set.FFmpegPath {
 		set.FFmpegPath = p
 		if pr := filepath.Join(filepath.Dir(p), "ffprobe"); fileExists(pr) {
