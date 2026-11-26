@@ -45,8 +45,16 @@ func (u *Updater) Restart() {
 	os.Exit(0)
 }
 
-// DefaultUpdateURL is the GitHub Releases API of the official repo.
-const DefaultUpdateURL = "https://api.github.com/repos/abormze/master-gpu/releases/latest"
+// DefaultUpdateURL is the GitHub Releases API of the official repo; when the API
+// rate-limits (60/h per IP unauthenticated) the latest.json release asset is used.
+var (
+	DefaultUpdateURL  = "https://api.github.com/repos/abormze/master-gpu/releases/latest"
+	DefaultUpdateJSON = "https://github.com/abormze/master-gpu/releases/latest/download/latest.json"
+)
+
+type statusErr int
+
+func (e statusErr) Error() string { return fmt.Sprintf("update server status %d", int(e)) }
 
 // ReleaseAsset is the binary name attached to each GitHub release.
 const ReleaseAsset = "mastergpu-linux-amd64"
@@ -82,7 +90,7 @@ func updateGet(url, token, accept string, timeout time.Duration) (*http.Response
 		if resp.StatusCode == 404 && strings.HasPrefix(url, "https://api.github.com/") {
 			return nil, errors.New("no release found (private repo needs an update token)")
 		}
-		return nil, fmt.Errorf("update server status %d", resp.StatusCode)
+		return nil, statusErr(resp.StatusCode)
 	}
 	return resp, nil
 }
@@ -93,6 +101,10 @@ func fetchRelease(url, token string) (*Release, error) {
 		url = DefaultUpdateURL
 	}
 	resp, err := updateGet(url, token, "application/vnd.github+json", 20*time.Second)
+	var se statusErr
+	if errors.As(err, &se) && (se == 403 || se == 429) && url == DefaultUpdateURL {
+		resp, err = updateGet(DefaultUpdateJSON, "", "", 20*time.Second)
+	}
 	if err != nil {
 		return nil, err
 	}

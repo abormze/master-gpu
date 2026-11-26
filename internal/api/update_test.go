@@ -30,3 +30,21 @@ func TestNewer(t *testing.T) {
 		}
 	}
 }
+
+func TestFetchRateLimitedFallback(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api" {
+			w.WriteHeader(403)
+			return
+		}
+		w.Write([]byte(`{"version":"1.3","url":"https://dl/bin","sha256":"def"}`))
+	}))
+	defer ts.Close()
+	a, j := DefaultUpdateURL, DefaultUpdateJSON
+	DefaultUpdateURL, DefaultUpdateJSON = ts.URL+"/api", ts.URL+"/latest.json"
+	defer func() { DefaultUpdateURL, DefaultUpdateJSON = a, j }()
+	rel, err := fetchRelease("", "")
+	if err != nil || rel.Version != "1.3" || rel.SHA256 != "def" {
+		t.Fatalf("%+v %v", rel, err)
+	}
+}
