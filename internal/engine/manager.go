@@ -397,6 +397,9 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 		os.RemoveAll(root)
 		os.MkdirAll(root, 0o755)
 		opts := BuildOpts{GPU: g, HLSRoot: root, HTTPPipe: true, FFmpegVer: m.ffVer, Gateway: m.Gateway}
+		if g < 0 {
+			opts.VAAPI = gpu.VAAPIDevice()
+		}
 		if len(s.Inputs) > 0 {
 			opts.Input = s.Inputs[idx]
 		}
@@ -519,7 +522,7 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 
 func (m *Manager) pickGPU(s *models.Stream, st models.Settings) int {
 	t := s.Transcode
-	if isCopy(&t) || t.HWAccel == "" || t.HWAccel == "none" || t.HWAccel == "qsv" {
+	if isCopy(&t) || t.HWAccel == "" || t.HWAccel == "none" || t.HWAccel == "qsv" || t.HWAccel == "vaapi" {
 		return -1
 	}
 	if s.GPU >= 0 {
@@ -527,7 +530,7 @@ func (m *Manager) pickGPU(s *models.Stream, st models.Settings) int {
 	}
 	info := m.gm.Get()
 	if !info.Available {
-		if st.LBCPUFallback {
+		if st.LBCPUFallback || gpu.VAAPIDevice() != "" {
 			return -1
 		}
 		return -2

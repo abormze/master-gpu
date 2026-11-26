@@ -76,7 +76,7 @@ const OUTF = [F.s("type", "Type|النوع", opts("hls", "hls_master", "http", "
 const PO = { po: 1 }, IMG = /\.(png|jpe?g|gif|webp|bmp|svg)$/i, SUBX = /\.(srt|ass|ssa|vtt|ttml|xml)$/i;
 const XO = {
   vsync: opts(["", "Auto"], ["passthrough", "Pass Through"], ["cfr", "Constant Frame Rate"], ["vfr", "Variable Frame Rate"], ["drop", "Drop"]),
-  hwm: opts(["full", "Full"], ["partial", "Partial"], ["encode", "Encoding Only"], ["none", "None (CPU)|بدون (CPU)"], ["qsv", "Intel QSV"]),
+  hwm: opts(["full", "Full"], ["partial", "Partial"], ["encode", "Encoding Only"], ["none", "None (CPU)|بدون (CPU)"], ["qsv", "Intel QSV"], ["vaapi", "AMD / Intel VAAPI"]),
   vcodec: opts(["copy", "Copy"], ["mpeg2", "H.262 / MPEG-2"], ["h264", "H.264 / MPEG-4"], ["hevc", "H.265 / HEVC"], ["av1", "AV1"]),
   preset: opts(["", "Auto"], ["ultrafast", "Ultrafast"], ["superfast", "Superfast"], ["veryfast", "Veryfast"], ["faster", "Faster"], ["fast", "Fast"], ["medium", "Medium"], ["slow", "Slow"], ["slower", "Slower"], ["veryslow", "Veryslow"], ["hp", "High Performance"], ["hq", "High Quality"], ["llhp", "Low Latency High Performance"], ["llhq", "Low Latency High Quality"], ["p1", "P1 (fastest)"], ["p2", "P2"], ["p3", "P3"], ["p4", "P4 (medium)"], ["p5", "P5"], ["p6", "P6"], ["p7", "P7 (best quality)"]),
   vprof: opts(["", "Auto"], ["baseline", "Baseline"], ["main", "Main"], ["high", "High"], ["high444p", "High444P"], ["main10", "Main10"], ["main12", "Main12"], ["mainsp", "MainSP"], ["rext", "Rext"]),
@@ -122,7 +122,7 @@ const XN = (o, v) => (o.find(([a]) => String(a) === String(v ?? "")) || [, v || 
 const isCp = x => (x.transcode?.video_encoders || []).every(v => v.codec === "copy");
 const tagc = t => { let h = 0; for (const c of t) h = (h * 31 + c.charCodeAt(0)) % 360; return `<span class="tg" style="background:hsl(${h} 45% 52%)">${esc(t.replace(/\s+/g, " ").trim())}</span>`; };
 const TRANS = p => [
-  F.h("Video|الفيديو"), F.s(p + "hwaccel", "Acceleration|التسريع", opts(["full", "NVIDIA full (decode+encode)|NVIDIA كامل"], ["encode", "NVIDIA encode only|ترميز NVIDIA فقط"], ["partial", "NVIDIA partial|NVIDIA جزئي"], ["qsv", "Intel QSV"], ["none", "CPU"])),
+  F.h("Video|الفيديو"), F.s(p + "hwaccel", "Acceleration|التسريع", opts(["full", "NVIDIA full (decode+encode)|NVIDIA كامل"], ["encode", "NVIDIA encode only|ترميز NVIDIA فقط"], ["partial", "NVIDIA partial|NVIDIA جزئي"], ["vaapi", "AMD / Intel (VAAPI)"], ["qsv", "Intel QSV"], ["none", "CPU"])),
   F.rows(p + "video_encoders", "Video variants (multi-bitrate)|نسخ الفيديو (عدة جودات)", VENC),
   F.s(p + "preset", "Preset", opts("", "p1", "p2", "p3", "p4", "p5", "p6", "p7", "ultrafast", "veryfast", "fast", "medium", "slow")), F.s(p + "profile", "Profile", opts("", "baseline", "main", "high", "main10")), F.t(p + "level", "Level"), F.t(p + "tune", "Tune", { ph: "ll / zerolatency" }),
   F.t(p + "frame_rate", "FPS"), F.n(p + "gop", "GOP"), F.n(p + "bframes", "B-frames"), F.b(p + "deinterlace", "Deinterlace|إزالة التشابك"), F.t(p + "pix_fmt", "Pixel format"), F.t(p + "dar", "Aspect (DAR)"), F.t(p + "video_map", "Video map", { ph: "0:v:0" }), F.t(p + "video_sync", "Video sync"),
@@ -163,7 +163,7 @@ const SCHEMAS = {
       "_a": XAUDIO("transcode."), "_s": [XSUB("transcode.")[0]], "Advanced Options|خيارات متقدمة": [XSUB("transcode.")[1], ...XMORE("transcode.")]
     }, def: { gpu: -2, transcode: { hwaccel: "full", video_encoders: [{ codec: "h264", rc: "cbr", bitrate: 4000 }], audio_encoders: [{ codec: "aac", bitrate: 128 }], preset: "medium", profile: "high", gop: 50, sub_mode: "copy" } },
     cols: [[x => `<span class="nb">${esc(x.name)}</span>`, "Name|الاسم"], [x => `<span class="tg">${esc(x.server_id ? refName("server", x.server_id) : "Master")}</span>`, "Server|السيرفر"],
-      [x => { const t = x.transcode || {}, cp = (t.video_encoders || []).every(v => v.codec === "copy"); return cp || t.hwaccel === "none" ? "" : `<span class="tg nv">${t.hwaccel === "qsv" ? "QSV" : "NVENC"}</span>${x.gpu >= 0 ? `<span class="tg">GPU${x.gpu}</span>` : ""}`; }, "HWAccel"],
+      [x => { const t = x.transcode || {}, cp = (t.video_encoders || []).every(v => v.codec === "copy"); return cp || t.hwaccel === "none" ? "" : `<span class="tg nv">${t.hwaccel === "qsv" ? "QSV" : t.hwaccel === "vaapi" ? "VAAPI" : "NVENC"}</span>${x.gpu >= 0 ? `<span class="tg">GPU${x.gpu}</span>` : ""}`; }, "HWAccel"],
       [x => (x.transcode?.video_encoders || []).map(v => v.codec === "copy" ? `<span class="tg cp">COPY</span>` : tagc(`${XN(XO.vcodec, v.codec).split(" /")[0]} ${v.size || ""} ${v.bitrate ? v.bitrate + " kbps" : ""}`)).join("<br>"), "Video Encoders"],
       [x => (x.transcode?.audio_encoders || []).map(a => a.codec === "copy" ? `<span class="tg cp">COPY</span>` : `<span class="tg au">${esc(XN(XO.acodec, a.codec))} ${a.bitrate || ""} kbps</span>`).join("<br>"), "Audio Encoders"],
       [x => esc(isCp(x) ? "-" : XN(XO.preset, x.transcode?.preset) || "Auto"), "Preset"], [x => esc(isCp(x) ? "-" : XN(XO.vprof, x.transcode?.profile) || "Auto"), "Profile"],
@@ -430,7 +430,7 @@ function outURL(root, row, i, types) {
 }
 const CPHIDE = ["hwaccel", "preset", "profile", "level", "frame_rate", "gop", "deinterlace", "pix_fmt", "dar", "overlay_file", "text", "audio_channels", "audio_rate", "audio_volume", "tune", "bframes", "audio_normalize"];
 function xRefresh(root) {
-  const L2 = encList(root), hw = $("[data-k=\"transcode.hwaccel\"] select", root)?.value, gpu = $("[data-k=gpu] select", root)?.value, hwt = hw === "none" || gpu === "-1" ? "CPU" : hw === "qsv" ? "QSV" : "NVENC";
+  const L2 = encList(root), hw = $("[data-k=\"transcode.hwaccel\"] select", root)?.value, gpu = $("[data-k=gpu] select", root)?.value, hwt = hw === "none" || gpu === "-1" ? "CPU" : hw === "qsv" ? "QSV" : hw === "vaapi" ? "VAAPI" : "NVENC";
   $$(".xrows > .rows", root).forEach(b => $$(":scope > .row", b).forEach((r, i) => { const n = $(".xn", r); if (n) n.textContent = i + 1; }));
   $$(".row.xe", root).forEach(r => {
     const c = $("[data-k=codec] select", r)?.value || "", cp = c === "copy";
@@ -595,8 +595,14 @@ VIEWS.dash = el => {
   S.onLive();
 };
 VIEWS.gpu = el => {
-  el.innerHTML = `<div class="tbar"><span class="sp"></span><button class="btn" id="bn">${ico("tools")} ${L("Benchmark|اختبار الأداء")}</button></div><div class="grid g2" id="gl"></div><div class="card" style="margin-top:16px"><div class="hd">${L("GPU processes|عمليات الكرت")}</div><div class="tw"><table><thead><tr><th>GPU</th><th>PID</th><th>${L("Process|العملية")}</th><th>VRAM</th></tr></thead><tbody id="gp"></tbody></table></div></div>`;
+  el.innerHTML = `<div class="tbar"><span class="sp"></span><button class="btn" id="bn">${ico("tools")} ${L("Benchmark|اختبار الأداء")}</button></div><div class="grid g2" id="gl"></div><div class="card" style="margin-top:16px"><div class="hd">${L("GPU processes|عمليات الكرت")}</div><div class="tw"><table><thead><tr><th>GPU</th><th>PID</th><th>${L("Process|العملية")}</th><th>VRAM</th></tr></thead><tbody id="gp"></tbody></table></div></div><div class="card" style="margin-top:16px"><div class="hd">${L("Detected GPUs & drivers|الكروت المكتشفة والدرايفرات")}</div><div class="tw"><table><thead><tr><th>Bus</th><th>Vendor</th><th>${L("Model|الموديل")}</th><th>Driver</th><th>Render</th><th>${L("Load|الحمل")}</th><th></th></tr></thead><tbody id="dv"></tbody></table></div><pre class="log" id="dvl" style="max-height:260px;overflow:auto;margin:12px"></pre></div>`;
   $("#bn").onclick = benchModal;
+  const drv = async () => { if (!$("#dv")) return; const d = await api("system/drivers").catch(() => null); if (!d || !$("#dv")) return;
+    $("#dv").innerHTML = (d.adapters || []).map(a => `<tr><td class="mono">${esc(a.bus)}</td><td>${esc(a.vendor.toUpperCase())}</td><td>${esc(a.name)}</td><td>${a.driver ? `<span class="chip ok">${esc(a.driver)}</span>` : `<span class="chip warn">${L("none|غير منصب")}</span>`}</td><td class="mono">${esc(a.render || "—")}</td><td>${a.vendor === "amd" ? `${a.util}% · ${a.temp}°C` : a.temp ? `${a.temp}°C` : "—"}</td><td><button class="btn" data-v="${esc(a.vendor)}" ${d.running ? "disabled" : ""}>${L("Install driver|تنصيب الدرايفر")}</button></td></tr>`).join("") || `<tr><td colspan="7" class="empty">${L("No GPU found|لا يوجد كرت شاشة")}</td></tr>`;
+    $("#dvl").textContent = (d.reboot_required ? L("Reboot the server to finish.|اعمل restart للسيرفر لإكمال التنصيب.") + "\n\n" : "") + (d.log || "");
+    $$("[data-v]", $("#dv")).forEach(b => b.onclick = async () => { if (!confirm(L("Install the driver for this GPU? This runs apt and may need a server reboot.|تنصيب درايفر هذا الكرت؟ قد يحتاج إعادة تشغيل السيرفر."))) return; await tryDo(() => api("system/drivers", { method: "POST", body: { vendor: b.dataset.v } })); setTimeout(drv, 1000); });
+    if (d.running) setTimeout(drv, 3000); };
+  drv();
   S.onLive = () => {
     if (!$("#gl") || !S.dash) return; const cs = S.dash.gpu.cards || [];
     $("#gl").innerHTML = cs.map(c => gpuCard(c).replace('<div class="bd">', `<div class="bd"><div class="kv" style="margin-bottom:10px"><b>UUID</b><span class="mono">${esc(c.uuid)}</span><b>Bus</b><span class="mono">${esc(c.bus)}</span><b>Driver</b><span>${esc(c.driver)} · VBIOS ${esc(c.vbios)}</span><b>Clocks</b><span>${c.clock_gr} / ${c.clock_mem} MHz</span><b>Encode FPS</b><span>${c.enc_fps}</span></div>`)).join("") || `<div class="card empty">${esc(S.dash.gpu.error || L("No NVIDIA GPU detected|لا يوجد كرت NVIDIA"))}</div>`;

@@ -52,12 +52,13 @@ type Proc struct {
 }
 
 type Info struct {
-	Available bool   `json:"available"`
-	Driver    string `json:"driver"`
-	CUDA      string `json:"cuda"`
-	Patched   bool   `json:"patched"`
-	Error     string `json:"error,omitempty"`
-	Cards     []Card `json:"cards"`
+	Available bool      `json:"available"`
+	Driver    string    `json:"driver"`
+	CUDA      string    `json:"cuda"`
+	Patched   bool      `json:"patched"`
+	Error     string    `json:"error,omitempty"`
+	Cards     []Card    `json:"cards"`
+	Adapters  []Adapter `json:"adapters"` // every NVIDIA/AMD/Intel GPU, with or without driver
 }
 
 type Monitor struct {
@@ -168,7 +169,7 @@ func (m *Monitor) poll() {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, m.smi, "--query-gpu="+query, "--format=csv,noheader,nounits").Output()
-	info := Info{}
+	info := Info{Adapters: Adapters()}
 	if err != nil {
 		info.Error = strings.TrimSpace(err.Error())
 		m.mu.Lock()

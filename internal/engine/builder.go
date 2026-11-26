@@ -24,6 +24,20 @@ type BuildOpts struct {
 	CENC       bool     // inputs are CENC DASH manifests (dash demuxer key option)
 	AudioInput int      // input index that supplies audio (DRM with separate audio key)
 	CopyTS     bool     // keep source timestamps (separate DRM track inputs share one timeline)
+	VAAPI      string   // AMD/Intel render node; used for "vaapi" and for NVIDIA modes when no NVIDIA GPU is assigned
+}
+
+func useVAAPI(t *models.Transcode, o BuildOpts) bool {
+	if o.VAAPI == "" || isCopy(t) {
+		return false
+	}
+	switch t.HWAccel {
+	case "vaapi":
+		return true
+	case "full", "partial", "encode", "nvenc":
+		return o.GPU < 0
+	}
+	return false
 }
 
 func isCopy(t *models.Transcode) bool {
@@ -43,10 +57,13 @@ func isHEVC(c string) bool { return c == "hevc" || c == "h265" }
 func encName(codec, hw string) string {
 	nv := hw == "full" || hw == "partial" || hw == "encode" || hw == "nvenc"
 	qsv := hw == "qsv"
+	va := hw == "vaapi"
 	switch codec {
 	case "hevc", "h265":
 		if nv {
 			return "hevc_nvenc"
+		} else if va {
+			return "hevc_vaapi"
 		} else if qsv {
 			return "hevc_qsv"
 		}
@@ -54,11 +71,16 @@ func encName(codec, hw string) string {
 	case "av1":
 		if nv {
 			return "av1_nvenc"
+		} else if va {
+			return "av1_vaapi"
 		} else if qsv {
 			return "av1_qsv"
 		}
 		return "libsvtav1"
 	case "mpeg2":
+		if va {
+			return "mpeg2_vaapi"
+		}
 		if qsv {
 			return "mpeg2_qsv"
 		}
@@ -68,6 +90,8 @@ func encName(codec, hw string) string {
 	default:
 		if nv {
 			return "h264_nvenc"
+		} else if va {
+			return "h264_vaapi"
 		} else if qsv {
 			return "h264_qsv"
 		}
@@ -178,6 +202,8 @@ func inputArgs(s *models.Stream, o BuildOpts, st *models.Settings) []string {
 		a = append(a, "-hwaccel", "cuda", "-hwaccel_output_format", "cuda", "-hwaccel_device", strconv.Itoa(o.GPU), "-extra_hw_frames", "4")
 	} else if !isCopy(t) && o.GPU >= 0 && t.HWAccel == "partial" {
 		a = append(a, "-hwaccel", "cuda", "-hwaccel_device", strconv.Itoa(o.GPU))
+	} else if useVAAPI(t, o) {
+		a = append(a, "-init_hw_device", "vaapi=va:"+o.VAAPI, "-filter_hw_device", "va", "-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "vaapi")
 	} else if !isCopy(t) && t.HWAccel == "qsv" {
 		a = append(a, "-hwaccel", "qsv", "-hwaccel_output_format", "qsv")
 	}
@@ -256,6 +282,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 	copyMode := isCopy(t)
 	nv := o.GPU >= 0 && (t.HWAccel == "full" || t.HWAccel == "partial" || t.HWAccel == "encode" || t.HWAccel == "nvenc")
 	fullHW := nv && t.HWAccel == "full"
+	va := !copyMode && useVAAPI(t, o)
 	venc := t.VideoEncoders
 	if len(venc) == 0 {
 		venc = []models.VideoEnc{{Codec: "copy"}}
@@ -325,6 +352,9 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			}
 			chain = append(chain, fmt.Sprintf("drawtext=text='%s':fontsize=%d:fontcolor=%s@%.2f:x=%s:y=%s:box=1:boxcolor=black@0.35:boxborderw=6", escText(t.Text), size, col, alpha, x, y))
 		}
+		if va && (len(chain) > 0 || t.OverlayFile != "" || t.SubMode == "burn") {
+			chain = append([]string{"hwdownload", "format=nv12"}, chain...)
+		}
 		pre := src
 		var g []string
 		if len(chain) > 0 {
@@ -371,6 +401,9 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 				in = fmt.Sprintf("[vs%d]", i)
 			}
 			var f []string
+			if va {
+				f = append(f, "format=nv12|vaapi", "hwupload")
+			}
 			cpuE := nv && v.Device == "cpu"
 			if uploadBack && !cpuE {
 				f = append(f, "hwupload_cuda")
@@ -383,6 +416,8 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 				switch {
 				case fullHW && !(cpuE && uploadBack):
 					f = append(f, fmt.Sprintf("scale_cuda=%s:%s", w, h))
+				case va:
+					f = append(f, fmt.Sprintf("scale_vaapi=w=%s:h=%s", w, h))
 				case t.HWAccel == "qsv":
 					f = append(f, fmt.Sprintf("scale_qsv=w=%s:h=%s", w, h))
 				default:
@@ -392,7 +427,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			if cpuE && fullHW && !uploadBack {
 				f = append(f, "hwdownload", "format=nv12")
 			}
-			if t.PixFmt != "" && !fullHW && t.HWAccel != "qsv" {
+			if t.PixFmt != "" && !fullHW && !va && t.HWAccel != "qsv" {
 				f = append(f, "format="+t.PixFmt)
 			}
 			if t.DAR != "" {
@@ -422,6 +457,8 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			hw = "nvenc"
 		} else if nv {
 			hw = "none"
+		} else if va {
+			hw = "vaapi"
 		}
 		name := encName(v.Codec, hw)
 		if copyMode || v.Codec == "copy" {
@@ -455,6 +492,8 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 		case "cq":
 			if vnv {
 				a = append(a, "-rc:v:"+vi, "vbr", "-cq:v:"+vi, strconv.Itoa(max(v.CQ, 23)), "-b:v:"+vi, "0")
+			} else if va {
+				a = append(a, "-rc_mode:v:"+vi, "CQP", "-qp:v:"+vi, strconv.Itoa(max(v.CQ, 23)))
 			} else {
 				a = append(a, "-crf:v:"+vi, strconv.Itoa(max(v.CQ, 23)))
 			}
@@ -480,6 +519,8 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 				}
 				if vnv {
 					a = append(a, "-rc:v:"+vi, map[bool]string{true: "vbr", false: "cbr"}[rc == "vbr"])
+				} else if va {
+					a = append(a, "-rc_mode:v:"+vi, map[bool]string{true: "VBR", false: "CBR"}[rc == "vbr"])
 				}
 			}
 		}

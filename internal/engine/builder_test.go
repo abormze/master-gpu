@@ -94,3 +94,30 @@ func TestInfoFPS(t *testing.T) {
 		t.Fatal(f)
 	}
 }
+
+func TestBuildVAAPI(t *testing.T) {
+	st := models.DefaultSettings()
+	for _, hw := range []string{"vaapi", "full"} {
+		s := models.Stream{Inputs: []string{"/x.ts"}, Transcode: models.Transcode{HWAccel: hw,
+			VideoEncoders: []models.VideoEnc{{Codec: "h264", Size: "1280x720", Bitrate: 1500}}},
+			Outputs: []models.Output{{Type: "hls", Name: "live"}}}
+		args, _, err := Build(&s, &st, BuildOpts{Input: "/x.ts", GPU: -1, HLSRoot: t.TempDir(), FFmpegVer: 6, VAAPI: "/dev/dri/renderD128"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		j := strings.Join(args, " ")
+		for _, w := range []string{"-hwaccel vaapi", "vaapi=va:/dev/dri/renderD128", "h264_vaapi", "scale_vaapi=w=1280:h=720", "hwupload", "-rc_mode:v:0 CBR"} {
+			if !strings.Contains(j, w) {
+				t.Errorf("%s: missing %q in %s", hw, w, j)
+			}
+		}
+		if strings.Contains(j, "nvenc") || strings.Contains(j, "libx264") {
+			t.Errorf("%s: wrong encoder: %s", hw, j)
+		}
+	}
+	s := models.Stream{Inputs: []string{"/x.ts"}, Transcode: models.Transcode{HWAccel: "full", VideoEncoders: []models.VideoEnc{{Codec: "h264", Bitrate: 1500}}}, Outputs: []models.Output{{Type: "hls", Name: "live"}}}
+	args, _, _ := Build(&s, &st, BuildOpts{Input: "/x.ts", GPU: 0, HLSRoot: t.TempDir(), FFmpegVer: 6, VAAPI: "/dev/dri/renderD128"})
+	if j := strings.Join(args, " "); !strings.Contains(j, "h264_nvenc") || strings.Contains(j, "vaapi") {
+		t.Errorf("nvidia path changed: %s", j)
+	}
+}

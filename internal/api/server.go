@@ -260,6 +260,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/servers/stats", s.authed(s.serverStats))
 	m.HandleFunc("POST /api/servers/{id}/{action}", s.admin(s.serverAction))
 	m.HandleFunc("GET /api/system/diag", s.admin(s.diag))
+	m.HandleFunc("GET /api/system/drivers", s.admin(s.drivers))
+	m.HandleFunc("POST /api/system/drivers", s.admin(s.driverInstall))
 	m.HandleFunc("POST /api/system/bench", s.admin(s.bench))
 	m.HandleFunc("POST /api/system/telegram-test", s.admin(func(w http.ResponseWriter, r *http.Request, _ *models.Account) {
 		if err := s.Alert("Master GPU: test alert"); err != nil {
