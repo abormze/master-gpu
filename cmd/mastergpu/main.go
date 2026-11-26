@@ -194,13 +194,36 @@ func housekeeping(st *store.Store, srv *api.Server, mgr *engine.Manager, sm *sys
 			day := now.Format("2006-01-02")
 			if now.Hour() == set.BackupHour && lastBackup != day {
 				lastBackup = day
-				if _, err := st.Backup(); err == nil {
-					pruneBackups(filepath.Join(st.Dir(), "backup"), set.BackupKeep)
+				if !set.BackupOff && set.BackupEvery <= 0 {
+					autoBackup(st, set)
 				}
 				st.Prune(20000, 30)
 			}
+			if !set.BackupOff && set.BackupEvery > 0 {
+				if t := newestBackup(st); now.Sub(t) >= time.Duration(set.BackupEvery)*time.Hour {
+					autoBackup(st, set)
+				}
+			}
 		}
 	}
+}
+
+func autoBackup(st *store.Store, set models.Settings) {
+	if _, err := st.Backup(); err != nil {
+		st.Log("panel", 0, "error", "auto backup: "+err.Error())
+		return
+	}
+	pruneBackups(filepath.Join(st.Dir(), "backup"), set.BackupKeep)
+}
+
+func newestBackup(st *store.Store) (t time.Time) {
+	m, _ := filepath.Glob(filepath.Join(st.Dir(), "backup", "panel-*.db"))
+	for _, f := range m {
+		if fi, err := os.Stat(f); err == nil && fi.ModTime().After(t) {
+			t = fi.ModTime()
+		}
+	}
+	return
 }
 
 func pruneBackups(dir string, keep int) {

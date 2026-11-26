@@ -42,6 +42,8 @@ type Settings struct {
 	AlertGPUTemp   int      `json:"alert_gpu_temp"`
 	BackupKeep     int      `json:"backup_keep"`
 	BackupHour     int      `json:"backup_hour"`
+	BackupEvery    int      `json:"backup_every"` // hours between automatic backups; 0 = daily at backup_hour
+	BackupOff      bool     `json:"backup_off"`
 	SecurePlayback bool     `json:"secure_playback"`
 	DRMProvider    string   `json:"drm_provider"`
 	DRMRequestURL  string   `json:"drm_request_url"`
