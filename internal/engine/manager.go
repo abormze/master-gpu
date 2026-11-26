@@ -349,12 +349,27 @@ func (m *Manager) setState(id int64, name string, p *proc, to State, msg string)
 func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 	defer close(p.done)
 	defer p.releaseSource(20 * time.Second)
-	fails := 0
+	fails, first := 0, true
 	for {
 		var s models.Stream
 		if err := m.st.Get(models.KStream, id, &s); err != nil {
 			m.setState(id, "", p, Stopped, "stream deleted")
 			return
+		}
+		raw := s.Inputs
+		s.Inputs = EnabledInputs(raw)
+		if first {
+			first = false
+			if ii := s.InputIndex; ii > 0 && ii < len(raw) {
+				for j, u := range s.Inputs {
+					if u == raw[ii] {
+						p.mu.Lock()
+						p.st.Input = j
+						p.mu.Unlock()
+						break
+					}
+				}
+			}
 		}
 		st := m.settings()
 		if s.ProfileID > 0 {
@@ -495,6 +510,19 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 			return
 		}
 	}
+}
+
+var disabledInput = regexp.MustCompile(`^\d+[a-zA-Z][a-zA-Z0-9+.-]*://`)
+
+// EnabledInputs drops sources disabled with a numeric prefix (e.g. "1http://", Xaccel style).
+func EnabledInputs(in []string) []string {
+	out := make([]string, 0, len(in))
+	for _, u := range in {
+		if !disabledInput.MatchString(strings.TrimSpace(u)) {
+			out = append(out, u)
+		}
+	}
+	return out
 }
 
 func backoff(base, fails int) time.Duration {

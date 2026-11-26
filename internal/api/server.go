@@ -1018,7 +1018,7 @@ func (s *Server) streamStats(w http.ResponseWriter, r *http.Request, _ *models.A
 	d := s.Mgr.Details(id)
 	res := map[string]any{
 		"id": id, "state": st.State, "cpu_percent": st.CPU, "mem_rss": st.RSS, "input_buf": st.InputBuf,
-		"input_urls": x.Inputs, "input_index": st.Input,
+		"input_urls": engine.EnabledInputs(x.Inputs), "input_index": st.Input,
 		"streaminfo": map[string]any{"input": d.In, "output": d.Out},
 	}
 	if s.GPU != nil && st.PID > 0 {

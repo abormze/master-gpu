@@ -577,7 +577,7 @@ func Build(s *models.Stream, st *models.Settings, o BuildOpts) ([]string, []Vari
 			a = append(a, "-c:a:"+ai, "copy")
 			continue
 		}
-		a = append(a, "-c:a:"+ai, audioEnc(ae.Codec))
+		a = append(a, "-c:a:"+ai, audioEncFor(st.FFmpegPath, ae.Codec))
 		if ae.Bitrate > 0 {
 			a = append(a, "-b:a:"+ai, strconv.Itoa(ae.Bitrate)+"k")
 		}

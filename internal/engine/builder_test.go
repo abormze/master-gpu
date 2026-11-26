@@ -121,3 +121,10 @@ func TestBuildVAAPI(t *testing.T) {
 		t.Errorf("nvidia path changed: %s", j)
 	}
 }
+
+func TestEnabledInputs(t *testing.T) {
+	got := EnabledInputs([]string{"http://a/1", "1http://b/2", "udp://239.0.0.1:1234", "1udp://c", "srt://d"})
+	if len(got) != 3 || got[0] != "http://a/1" || got[1] != "udp://239.0.0.1:1234" || got[2] != "srt://d" {
+		t.Fatal(got)
+	}
+}
