@@ -59,6 +59,7 @@ type Settings struct {
 	DefaultProxy   string   `json:"default_proxy"`
 	ProxyList      []string `json:"proxy_list"` // rotating pool
 	UpdateURL      string   `json:"update_url"`
+	UpdateToken    string   `json:"update_token"` // GitHub token for private release repos
 	PublicHost     string   `json:"public_host"`
 	HTTPPort       int      `json:"http_port"`
 	StartupDelay   int      `json:"startup_delay"`

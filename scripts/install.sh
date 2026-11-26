@@ -1,12 +1,19 @@
 #!/bin/sh
 # Master GPU installer — Ubuntu 18.04+
 # usage: sudo sh install.sh [path-to-mastergpu-binary] [port]
+# without a local binary the latest GitHub release is downloaded
 set -e
 BIN=${1:-./mastergpu}
 PORT=${2:-8080}
 DIR=/opt/mastergpu
+REL=${MASTERGPU_RELEASE:-https://github.com/abormze/master-gpu/releases/latest/download/mastergpu-linux-amd64}
 [ "$(id -u)" = 0 ] || { echo "run as root"; exit 1; }
-[ -f "$BIN" ] || { echo "binary not found: $BIN"; exit 1; }
+if [ ! -f "$BIN" ]; then
+  echo "downloading $REL"
+  BIN=$(mktemp)
+  curl -fL --retry 3 -o "$BIN" "$REL" || { echo "download failed: $REL"; exit 1; }
+  chmod 755 "$BIN"
+fi
 if ! command -v ffmpeg >/dev/null 2>&1; then
   apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg
 fi
