@@ -965,6 +965,10 @@ func (s *Server) streamOut(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such output", 404)
 		return
 	}
+	if x.LiveOnly && s.Mgr.Status(id).State == engine.Waiting {
+		http.Error(w, "stream offline", 404) // live-only stream waiting for its source to go live
+		return
+	}
 	if kind == "http" {
 		if !s.Mgr.Running(id) {
 			if !x.Enabled && !x.OnDemand {
