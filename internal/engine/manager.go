@@ -68,6 +68,7 @@ type proc struct {
 	mu       sync.Mutex
 	st       Status
 	cancel   context.CancelFunc
+	ctx      context.Context // context of the loop that owns this proc
 	cmd      *exec.Cmd
 	want     bool
 	hub      *Hub
@@ -275,7 +276,7 @@ func (m *Manager) Start(id int64) error {
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	p.want, p.cancel, p.done = true, cancel, make(chan struct{})
+	p.want, p.cancel, p.done, p.ctx = true, cancel, make(chan struct{}), ctx
 	p.st.Restarts = 0
 	p.mu.Unlock()
 	go m.loop(ctx, id, p)
@@ -348,7 +349,19 @@ func (m *Manager) setState(id int64, name string, p *proc, to State, msg string)
 
 func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 	defer close(p.done)
-	defer p.releaseSource(20 * time.Second)
+	// A restart may start a new loop before this one exits; a stale loop must
+	// not overwrite the new loop's state or release its source.
+	current := func() bool { p.mu.Lock(); defer p.mu.Unlock(); return p.ctx == ctx }
+	stopped := func(name string) {
+		if current() {
+			m.setState(id, name, p, Stopped, "")
+		}
+	}
+	defer func() {
+		if current() {
+			p.releaseSource(20 * time.Second)
+		}
+	}()
 	fails, first := 0, true
 	for {
 		var s models.Stream
@@ -403,7 +416,7 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 		if g == -2 {
 			m.setState(id, s.Name, p, Waiting, "no GPU capacity (load balancer)")
 			if !sleepCtx(ctx, 10*time.Second) {
-				m.setState(id, s.Name, p, Stopped, "")
+				stopped(s.Name)
 				return
 			}
 			continue
@@ -427,7 +440,7 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 				m.setState(id, s.Name, p, Restarting, "DRM: "+err.Error())
 				fails++
 				if !sleepCtx(ctx, backoff(st.RestartDelay, fails)) {
-					m.setState(id, s.Name, p, Stopped, "")
+					stopped(s.Name)
 					return
 				}
 				continue
@@ -484,8 +497,10 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 		reason := m.run(runCtx, id, &s, &st, p, args, spl)
 		runCancel()
 		if ctx.Err() != nil {
-			m.setState(id, s.Name, p, Stopped, "")
-			p.hub.Reset()
+			if current() {
+				m.setState(id, s.Name, p, Stopped, "")
+				p.hub.Reset()
+			}
 			return
 		}
 		p.mu.Lock()
@@ -506,7 +521,7 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 		}
 		m.setState(id, s.Name, p, Restarting, reason)
 		if !sleepCtx(ctx, backoff(st.RestartDelay, fails)) {
-			m.setState(id, s.Name, p, Stopped, "")
+			stopped(s.Name)
 			return
 		}
 	}
