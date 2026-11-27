@@ -115,7 +115,7 @@ func main() {
 			}
 		}()
 	}
-	ds := &drm.Service{St: st, LocalBase: "http://" + loopback(addr), FFmpegVer: mgr.FFVersion}
+	ds := &drm.Service{St: st, LocalBase: "http://" + loopback(addr), FFmpegVer: mgr.DRMFFVersion}
 	mgr.PrepDRM, mgr.Relay = ds.Prep, ds.Relay
 
 	srtm := srtin.New(st)

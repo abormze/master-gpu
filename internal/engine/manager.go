@@ -153,6 +153,7 @@ type Manager struct {
 	procs   map[int64]*proc
 	Hooks   Hooks
 	ffVer   int
+	drmVer  map[string]int
 	Gateway string
 	PrepDRM func(ctx context.Context, s *models.Stream, input, root string) (*BuildOpts, error)
 	Relay   func(s *models.Stream) string // returns local http proxy url when stream needs proxy/bind/dns
@@ -171,6 +172,32 @@ func (m *Manager) settings() models.Settings {
 }
 
 func (m *Manager) FFVersion() int { return m.ffVer }
+
+// drmFFmpeg returns the FFmpeg binary and major version used for DRM streams:
+// settings.DRMFFmpegPath when set and runnable, else the panel FFmpeg.
+func (m *Manager) drmFFmpeg(st models.Settings) (string, int) {
+	if p := st.DRMFFmpegPath; p != "" {
+		m.mu.Lock()
+		v, ok := m.drmVer[p]
+		m.mu.Unlock()
+		if !ok {
+			v = FFmpegMajor(p)
+			m.mu.Lock()
+			if m.drmVer == nil {
+				m.drmVer = map[string]int{}
+			}
+			m.drmVer[p] = v
+			m.mu.Unlock()
+		}
+		if v > 0 {
+			return p, v
+		}
+	}
+	return st.FFmpegPath, m.ffVer
+}
+
+// DRMFFVersion is the FFmpeg major version DRM streams run with.
+func (m *Manager) DRMFFVersion() int { _, v := m.drmFFmpeg(m.settings()); return v }
 
 var verRe = regexp.MustCompile(`ffmpeg version n?(\d+)`)
 
@@ -440,7 +467,11 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 		root := filepath.Join(st.HLSDir, strconv.FormatInt(id, 10))
 		os.RemoveAll(root)
 		os.MkdirAll(root, 0o755)
-		opts := BuildOpts{GPU: g, HLSRoot: root, HTTPPipe: true, FFmpegVer: m.ffVer, Gateway: m.Gateway}
+		ffVer := m.ffVer
+		if s.DRM.Enabled {
+			st.FFmpegPath, ffVer = m.drmFFmpeg(st)
+		}
+		opts := BuildOpts{GPU: g, HLSRoot: root, HTTPPipe: true, FFmpegVer: ffVer, Gateway: m.Gateway}
 		if g < 0 {
 			opts.VAAPI = gpu.VAAPIDevice()
 		}

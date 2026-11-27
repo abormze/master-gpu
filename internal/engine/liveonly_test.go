@@ -12,6 +12,8 @@ func TestHLSLive(t *testing.T) {
 		"/live/v.m3u8":  "#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:5\n#EXTINF:4,\na.mp4\n",
 		"/ended/v.m3u8": "#EXTM3U\n#EXTINF:4,\na.mp4\n#EXT-X-ENDLIST\n",
 		"/vod/v.m3u8":   "#EXTM3U\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:4,\na.mp4\n",
+		"/d/live.mpd":   `<?xml version="1.0"?><MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="dynamic"></MPD>`,
+		"/d/vod.mpd":    `<?xml version="1.0"?><MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static"></MPD>`,
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if b, ok := media[r.URL.Path]; ok {
@@ -28,7 +30,7 @@ func TestHLSLive(t *testing.T) {
 	for in, want := range map[string]bool{
 		srv.URL + "/live/index.m3u8": true, srv.URL + "/ended/index.m3u8": false,
 		srv.URL + "/vod/index.m3u8": false, srv.URL + "/gone/index.m3u8": false,
-		srv.URL + "/live/v.m3u8": true, "udp://239.0.0.1:1234": true,
+		srv.URL + "/live/v.m3u8": true, srv.URL + "/d/live.mpd": true, srv.URL + "/d/vod.mpd": false, srv.URL + "/d/gone.mpd": false, "udp://239.0.0.1:1234": true,
 	} {
 		if got, why := hlsLive(context.Background(), in, "", ""); got != want {
 			t.Errorf("%s: live=%v (%s), want %v", in, got, why, want)

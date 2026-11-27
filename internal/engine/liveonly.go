@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -15,7 +16,8 @@ import (
 // playlist has no #EXT-X-ENDLIST and is not PLAYLIST-TYPE:VOD. Non-HLS inputs and
 // transient network errors count as live so normal restart handling applies.
 func hlsLive(ctx context.Context, in, ua, referer string) (bool, string) {
-	if !strings.Contains(strings.ToLower(path.Ext(strings.SplitN(in, "?", 2)[0])), "m3u8") {
+	ext := strings.ToLower(path.Ext(strings.SplitN(in, "?", 2)[0]))
+	if ext != ".m3u8" && ext != ".mpd" {
 		return true, ""
 	}
 	get := func(u string) (string, int, error) {
@@ -47,6 +49,12 @@ func hlsLive(ctx context.Context, in, ua, referer string) (bool, string) {
 	if code >= 400 {
 		return false, fmt.Sprintf("source HTTP %d", code)
 	}
+	if ext == ".mpd" {
+		if mpdStatic.MatchString(body) {
+			return false, "source not live (static MPD)"
+		}
+		return true, ""
+	}
 	if strings.Contains(body, "#EXT-X-STREAM-INF") {
 		lines := strings.Split(body, "\n")
 		for i, l := range lines {
@@ -77,3 +85,5 @@ func hlsLive(ctx context.Context, in, ua, referer string) (bool, string) {
 	}
 	return true, ""
 }
+
+var mpdStatic = regexp.MustCompile(`<MPD[^>]*\stype="static"`)

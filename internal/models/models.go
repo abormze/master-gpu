@@ -29,6 +29,7 @@ type Settings struct {
 	Theme          string   `json:"theme"`
 	FFmpegPath     string   `json:"ffmpeg_path"`
 	FFprobePath    string   `json:"ffprobe_path"`
+	DRMFFmpegPath  string   `json:"drm_ffmpeg_path"` // optional FFmpeg (>= 6.1) used only for DRM streams
 	HLSDir         string   `json:"hls_dir"`
 	StreamTimeout  int      `json:"stream_timeout"`
 	RestartDelay   int      `json:"restart_delay"`
