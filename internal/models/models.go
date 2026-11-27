@@ -248,6 +248,7 @@ type Stream struct {
 	MemMaxMB    int       `json:"mem_max_mb"`
 	GPUMemMaxMB int       `json:"gpu_mem_max_mb"`
 	Watchdog    bool      `json:"watchdog"`
+	LiveOnly    bool      `json:"live_only"` // HLS: wait while the source is VOD/ended, start when it goes live
 	Note        string    `json:"note"`
 	Order       int       `json:"order"`
 }

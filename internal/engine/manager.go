@@ -421,6 +421,22 @@ func (m *Manager) loop(ctx context.Context, id int64, p *proc) {
 			}
 			continue
 		}
+		if s.LiveOnly && len(s.Inputs) > 0 {
+			if live, why := hlsLive(ctx, s.Inputs[idx], s.UserAgent, s.Referer); !live {
+				p.mu.Lock()
+				was := p.st.State == Waiting
+				p.mu.Unlock()
+				if !was {
+					m.st.Log("stream", id, "info", "live only: "+why+", waiting")
+				}
+				m.setState(id, s.Name, p, Waiting, why)
+				if !sleepCtx(ctx, 20*time.Second) {
+					stopped(s.Name)
+					return
+				}
+				continue
+			}
+		}
 		root := filepath.Join(st.HLSDir, strconv.FormatInt(id, 10))
 		os.RemoveAll(root)
 		os.MkdirAll(root, 0o755)
