@@ -210,6 +210,10 @@ async function boot() {
   S.ver = await fetch("/api/version", { cache: "no-store" }).then(r => r.json()).catch(() => ({}));
   try { S.me = await api("me"); } catch { S.me = null; }
   render();
+  if (!S.verWatch) S.verWatch = setInterval(async () => {
+    const v = await fetch("/api/version", { cache: "no-store" }).then(r => r.json()).catch(() => null);
+    if (v && v.build && S.ver.build && v.build !== S.ver.build) location.reload(); // panel was updated: load the new UI
+  }, 30000);
 }
 function render() {
   if (!S.me) return loginView();
